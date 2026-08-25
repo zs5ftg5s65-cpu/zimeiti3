@@ -1,0 +1,20 @@
+{
+  "name": "自媒体3.0 · 餐饮老板娘运营中枢",
+  "short_name": "自媒体中枢",
+  "description": "餐饮老板娘AI自媒体运营工作台：选题、脚本、拍摄、发布、数据、复盘一站式管理",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#d97706",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "social"]
+}
