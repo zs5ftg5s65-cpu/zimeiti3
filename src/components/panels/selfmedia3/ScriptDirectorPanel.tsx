@@ -66,6 +66,40 @@ export default function ScriptDirectorPanel({ store }: Props) {
     store.updateScript(active.id, { ...patch, updatedAt: Date.now() });
   };
 
+  const copyScript = () => {
+    if (!active) return;
+    const copy = store.addScript({
+      ...active,
+      title: active.title + "（副本）",
+      status: "草稿",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    } as Omit<Script, "id" | "accountId" | "storeId">);
+    setActiveId(copy.id);
+    toast.success("脚本已复制");
+  };
+
+  const deleteScript = () => {
+    if (!active) return;
+    deleteScriptById(active.id);
+  };
+  const deleteScriptById = (id: string) => {
+    const target = filtered.find((s) => s.id === id);
+    if (!target) return;
+    const hasLinks = target.sourceTopicId || (target.requiredMediaIds?.length ?? 0) > 0;
+    const msg = hasLinks
+      ? `脚本"${target.title}"已关联选题/素材，删除脚本不会删除关联数据。确定删除吗？`
+      : `确定删除脚本"${target.title}"吗？此操作不可撤销。`;
+    if (window.confirm(msg)) {
+      store.removeScript(id);
+      if (activeId === id) {
+        const remaining = filtered.filter((s) => s.id !== id);
+        setActiveId(remaining[0]?.id || null);
+      }
+      toast.success("脚本已删除");
+    }
+  };
+
   const updateShot = (idx: number, patch: Partial<Shot>) => {
     if (!active) return;
     const shots = [...active.shots];
@@ -121,18 +155,42 @@ export default function ScriptDirectorPanel({ store }: Props) {
       </div>
 
       {filtered.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 items-center">
           {filtered.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveId(s.id)}
-              className={`shrink-0 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                active?.id === s.id ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              {s.title.slice(0, 12)}
-            </button>
+            <div key={s.id} className="flex items-center shrink-0">
+              <button
+                onClick={() => setActiveId(s.id)}
+                className={`shrink-0 px-3 py-1.5 rounded-l-md text-xs font-medium transition-colors ${
+                  active?.id === s.id ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {s.title.slice(0, 10)}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteScriptById(s.id);
+                }}
+                className={`shrink-0 px-2 py-1.5 rounded-r-md text-xs transition-colors border-l ${
+                  active?.id === s.id ? "bg-primary/80 text-primary-foreground hover:bg-destructive" : "bg-muted/50 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                }`}
+                title="删除脚本"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </div>
           ))}
+        </div>
+      )}
+
+      {active && (
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={copyScript} className="flex-1 gap-1.5">
+            <Copy className="size-3.5" /> 复制脚本
+          </Button>
+          <Button size="sm" variant="outline" onClick={deleteScript} className="flex-1 gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/5">
+            <Trash2 className="size-3.5" /> 删除脚本
+          </Button>
         </div>
       )}
 

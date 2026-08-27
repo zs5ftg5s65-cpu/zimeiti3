@@ -225,7 +225,7 @@ export default function StudySidebar({
   }, [progress]);
 
   const sidebarBody = (
-    <div className="h-full flex flex-col bg-card border-r border-border/60">
+    <div className="h-full flex flex-col bg-white border-r border-border/60">
       <div className="flex items-center justify-between px-3 py-3 border-b border-border/50">
         <div className="flex items-center gap-2 min-w-0">
           <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
@@ -292,7 +292,7 @@ export default function StudySidebar({
 
   if (forceMobile) {
     return (
-      <div className="h-full flex flex-col bg-card w-full">
+      <div className="h-full flex flex-col bg-white w-full overflow-hidden">
         <div className="flex items-center px-3 py-3 border-b border-border/50">
           <div className="flex items-center gap-2 min-w-0">
             <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">

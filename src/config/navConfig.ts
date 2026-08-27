@@ -17,7 +17,8 @@ export interface NavItem {
       | 'selfmedia-data'
       | 'selfmedia-daily'
       | 'overview-schedule'
-      | 'overview-checkin';
+      | 'overview-checkin'
+      | 'review-center';
     day?: number;
     moduleId?: string;
   };
@@ -76,6 +77,12 @@ export const NAV_CONFIG: NavItem[] = [
         label: '30天学习进度打卡表',
         type: 'item',
         payload: { kind: 'overview-checkin' },
+      },
+      {
+        id: 'review-center',
+        label: '复习中心',
+        type: 'item',
+        payload: { kind: 'review-center' },
       },
     ],
   },

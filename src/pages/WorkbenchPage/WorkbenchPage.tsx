@@ -12,6 +12,8 @@ import EnglishDetailPanel from '@/components/panels/EnglishDetailPanel';
 import EnglishResourcesPanel from '@/components/panels/EnglishResourcesPanel';
 import SelfmediaPanel from '@/components/panels/SelfmediaPanel';
 import OverviewPanel from '@/components/panels/OverviewPanel';
+import ReviewCenterPanel from '@/components/panels/ReviewCenterPanel';
+import { useAccountingReview } from '@/hooks/useAccountingReview';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
 
 const CURRENT_ITEM_KEY = '__app_current_item';
@@ -19,6 +21,7 @@ const CURRENT_ITEM_KEY = '__app_current_item';
 export default function WorkbenchPage() {
   const { progress, currentDay, setCurrentDay, toggleTask, setDayTasks, resetAll, stats, completedDays } =
     useStudyProgress();
+  const { initDayForReview } = useAccountingReview();
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     try {
@@ -30,6 +33,7 @@ export default function WorkbenchPage() {
     return 'overview-schedule';
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [selfmediaTab, setSelfmediaTab] = useState<string>('warroom');
 
   useEffect(() => {
     try {
@@ -38,6 +42,17 @@ export default function WorkbenchPage() {
       // ignore
     }
   }, [selectedId]);
+
+  // 无论通过哪条路径（详情页按钮 / 顶部"标记今日完成"），
+  // 只要会计某天从未完成变为完成，就自动生成该天复习记录。
+  // initDayForReview 内部有 initializedDays 去重，不会重复生成。
+  useEffect(() => {
+    for (let d = 1; d <= 30; d++) {
+      if (progress[d]?.accounting) {
+        initDayForReview(d);
+      }
+    }
+  }, [progress, initDayForReview]);
 
   const selectedItem = useMemo(() => {
     function findItem(items: NavItem[], id: string): NavItem | null {
@@ -73,6 +88,9 @@ export default function WorkbenchPage() {
     if (selectedItem.payload?.kind === 'selfmedia-daily') {
       return '自媒体 · 30天成长计划';
     }
+    if (selectedItem.payload?.kind === 'review-center') {
+      return '复习中心';
+    }
     return selectedItem.label;
   }, [selectedItem]);
 
@@ -82,19 +100,59 @@ export default function WorkbenchPage() {
       if (item.payload.day) {
         setCurrentDay(item.payload.day);
       }
+      // 同步自媒体目标tab
+      if (item.payload.moduleId) {
+        setSelfmediaTab(item.payload.moduleId);
+      }
     }
     setMobileNavOpen(false);
   };
 
-  const handleDaySelect = (day: number, kind: 'accounting' | 'english') => {
+  const handleDaySelect = (day: number, kind: 'accounting' | 'english' | 'selfmedia') => {
+    if (kind === 'selfmedia') {
+      setSelectedId('selfmedia3-warroom');
+      setCurrentDay(day);
+      return;
+    }
     const id = `${kind}-day-${day}`;
     setSelectedId(id);
     setCurrentDay(day);
   };
 
+  const handleReviewNavigate = (
+    kind: 'accounting' | 'english' | 'selfmedia',
+    day?: number,
+    tab?: string,
+  ) => {
+    if (kind === 'selfmedia') {
+      setSelfmediaTab(tab || 'warroom');
+      setSelectedId('selfmedia3-warroom');
+    } else {
+      const targetDay = day || currentDay;
+      setSelectedId(`${kind}-day-${targetDay}`);
+      setCurrentDay(targetDay);
+    }
+  };
+
+  /** 会计Day完成时，同时生成该天知识点的复习记录 */
+  const handleAccountingToggle = (day: number) => {
+    const wasCompleted = progress[day]?.accounting;
+    toggleTask(day, 'accounting');
+    if (!wasCompleted) {
+      initDayForReview(day);
+    }
+  };
+
   const renderPanel = () => {
     if (!selectedItem?.payload) {
-      return <DailyCombinedPanel day={currentDay} progress={progress[currentDay]} onDaySelect={handleDaySelect} />;
+      return (
+        <DailyCombinedPanel
+          day={currentDay}
+          progress={progress[currentDay]}
+          onDaySelect={handleDaySelect}
+          onOpenReview={() => setSelectedId('review-center')}
+        />
+      );
     }
     const { kind, day, moduleId } = selectedItem.payload;
     switch (kind) {
@@ -111,7 +169,7 @@ export default function WorkbenchPage() {
           <AccountingDetailPanel
             day={day || 1}
             isCompleted={progress[day || 1]?.accounting}
-            onToggleComplete={() => toggleTask(day || 1, 'accounting')}
+            onToggleComplete={() => handleAccountingToggle(day || 1)}
             onDayChange={(d) => {
               setCurrentDay(d);
               setSelectedId(`accounting-day-${d}`);
@@ -139,8 +197,8 @@ export default function WorkbenchPage() {
       case 'selfmedia-data':
         return (
           <SelfmediaPanel
-            activeModule={moduleId || 'positioning'}
-            initialTab={moduleId || 'warroom'}
+            activeModule={moduleId || 'warroom'}
+            initialTab={selfmediaTab || moduleId || 'warroom'}
             isCompleted={progress[currentDay]?.selfmedia}
             onToggleComplete={() => toggleTask(currentDay, 'selfmedia')}
             currentDay={currentDay}
@@ -156,12 +214,20 @@ export default function WorkbenchPage() {
             currentDay={currentDay}
           />
         );
+      case 'review-center':
+        return (
+          <ReviewCenterPanel
+            currentDay={currentDay}
+            onNavigate={handleReviewNavigate}
+          />
+        );
       default:
         return (
           <DailyCombinedPanel
             day={currentDay}
             progress={progress[currentDay]}
             onDaySelect={handleDaySelect}
+            onOpenReview={() => setSelectedId('review-center')}
           />
         );
     }

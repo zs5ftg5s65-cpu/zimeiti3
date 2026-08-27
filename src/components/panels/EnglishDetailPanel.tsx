@@ -11,16 +11,18 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
-  Eye,
   EyeOff,
   Lightbulb,
   GraduationCap,
   Pencil,
+  Play,
 } from 'lucide-react';
 import { MOCK_ENGLISH_DAYS } from '@/data/english';
 import { MOCK_ENGLISH_ANSWERS } from '@/data/englishAnswers';
 import SpeechControls from '@/components/SpeechControls';
 import { useSpeech } from '@/hooks/useSpeech';
+import { useWordLearning, type WordMastery } from '@/hooks/useWordLearning';
+import WordStudyModal from './WordStudyModal';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -31,49 +33,90 @@ interface EnglishDetailPanelProps {
   onDayChange: (day: number) => void;
 }
 
-function WordList({ words }: { words: { word: string; phonetic: string; pos?: string; meaning: string; example?: string; exampleCn?: string }[] }) {
-  const { speak, isSpeaking } = useSpeech();
+const MASTERY_DOT: Record<WordMastery, string> = {
+  new: 'bg-muted',
+  learning: 'bg-warning',
+  familiar: 'bg-info',
+  mastered: 'bg-success',
+};
 
+const MASTERY_LABEL: Record<WordMastery, string> = {
+  new: '未学',
+  learning: '学习中',
+  familiar: '熟悉',
+  mastered: '已掌握',
+};
+
+function WordList({
+  words,
+  day,
+  getRecord,
+  onStudy,
+}: {
+  words: { word: string; phonetic: string; pos?: string; meaning: string; example?: string; exampleCn?: string }[];
+  day: number;
+  getRecord: (day: number, word: string) => any;
+  onStudy: (day: number, word: string, mastery: WordMastery) => void;
+}) {
+  const { speak, isSpeaking } = useSpeech();
   return (
     <div className="space-y-2">
-      {words.map((w, i) => (
-        <div
-          key={i}
-          className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/40 hover:bg-muted/50 transition-colors group"
-        >
-          <button
-            onClick={() => speak(w.word)}
-            className="size-7 rounded-md bg-card border border-border/60 flex items-center justify-center shrink-0 hover:bg-primary/10 hover:border-primary/30 transition-colors"
-            aria-label={`朗读 ${w.word}`}
+      {words.map((w, i) => {
+        const record = getRecord(day, w.word);
+        const mastery: WordMastery = record?.mastery || 'new';
+        return (
+          <div
+            key={i}
+            className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/40 hover:bg-muted/50 transition-colors"
           >
-            <Volume2 className={`size-3.5 ${isSpeaking ? 'text-primary' : 'text-muted-foreground'}`} />
-          </button>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="font-semibold text-foreground text-sm">{w.word}</span>
-              <span className="text-xs text-muted-foreground font-mono">{w.phonetic}</span>
-              <span className="text-xs text-primary/80">{w.pos}</span>
+            <button
+              onClick={() => speak(w.word)}
+              className="size-7 rounded-md bg-white border border-border/60 flex items-center justify-center shrink-0 hover:bg-primary/10 hover:border-primary/30 transition-colors"
+              aria-label={`朗读 ${w.word}`}
+            >
+              <Volume2 className={`size-3.5 ${isSpeaking ? 'text-primary' : 'text-muted-foreground'}`} />
+            </button>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-foreground text-sm">{w.word}</span>
+                <span className="text-xs text-muted-foreground font-mono">{w.phonetic}</span>
+                {w.pos && <span className="text-xs text-primary/80">{w.pos}</span>}
+                <span className={cn('size-2 rounded-full shrink-0', MASTERY_DOT[mastery])} title={MASTERY_LABEL[mastery]} />
+              </div>
+              <p className="text-xs text-foreground/75 mt-0.5">{w.meaning}</p>
             </div>
-            <p className="text-xs text-foreground/75 mt-0.5">{w.meaning}</p>
+            <div className="flex gap-1 shrink-0">
+              <button
+                onClick={() => onStudy(day, w.word, 'learning')}
+                className="size-7 rounded-md border border-border/60 flex items-center justify-center hover:bg-warning/10 hover:border-warning/30 transition-colors"
+                title="标记不熟"
+              >
+                <span className="text-xs text-warning font-bold">!</span>
+              </button>
+              <button
+                onClick={() => onStudy(day, w.word, 'mastered')}
+                className="size-7 rounded-md border border-border/60 flex items-center justify-center hover:bg-success/10 hover:border-success/30 transition-colors"
+                title="标记已掌握"
+              >
+                <CheckCircle2 className="size-3.5 text-success" />
+              </button>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 function ReadingSection({ reading, day }: { reading: any; day: number }) {
   const answers = MOCK_ENGLISH_ANSWERS[day];
-  const { speak } = useSpeech();
   const [showQuiz, setShowQuiz] = useState(false);
   const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
   const [showResults, setShowResults] = useState(false);
-
   const handleSelect = (qIdx: number, optIdx: number) => {
     if (showResults) return;
     setUserAnswers((prev) => ({ ...prev, [qIdx]: optIdx }));
   };
-
   const checkAnswers = () => {
     setShowResults(true);
     const correct = answers.readingQuiz.filter(
@@ -81,9 +124,7 @@ function ReadingSection({ reading, day }: { reading: any; day: number }) {
     ).length;
     toast.success(`答对 ${correct}/${answers.readingQuiz.length} 题！`);
   };
-
   const fullText = reading?.paragraphs?.map((p: any) => p.en).join(' ') || '';
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -93,7 +134,6 @@ function ReadingSection({ reading, day }: { reading: any; day: number }) {
         </div>
         <SpeechControls text={fullText} />
       </div>
-
       <div className="space-y-3 text-sm leading-relaxed">
         {reading.paragraphs?.map((p: any, i: number) => (
           <div key={i} className="space-y-1.5">
@@ -102,7 +142,6 @@ function ReadingSection({ reading, day }: { reading: any; day: number }) {
           </div>
         ))}
       </div>
-
       {answers?.readingQuiz && answers.readingQuiz.length > 0 && (
         <div className="pt-3 border-t border-border/40">
           <Button
@@ -114,7 +153,6 @@ function ReadingSection({ reading, day }: { reading: any; day: number }) {
             <Pencil className="size-3.5" />
             {showQuiz ? '收起阅读理解练习' : '做阅读理解练习'}
           </Button>
-
           <AnimatePresence>
             {showQuiz && (
               <motion.div
@@ -126,7 +164,7 @@ function ReadingSection({ reading, day }: { reading: any; day: number }) {
               >
                 <div className="mt-4 space-y-4">
                   {answers.readingQuiz.map((q: any, qi: number) => (
-                    <div key={qi} className="p-3 rounded-lg bg-card border border-border/50">
+                    <div key={qi} className="p-3 rounded-lg bg-white border border-border/50">
                       <p className="text-sm font-medium text-foreground mb-2.5">
                         {qi + 1}. {q.question}
                       </p>
@@ -142,7 +180,7 @@ function ReadingSection({ reading, day }: { reading: any; day: number }) {
                               className={cn(
                                 'w-full text-left px-3 py-2 rounded-md text-xs transition-colors border',
                                 isCorrect
-                                  ? 'bg-success/10 border-success/30 text-success-foreground'
+                                  ? 'bg-success/10 border-success/30 text-success'
                                   : isWrong
                                   ? 'bg-destructive/10 border-destructive/30 text-destructive'
                                   : isSelected
@@ -165,7 +203,6 @@ function ReadingSection({ reading, day }: { reading: any; day: number }) {
                       )}
                     </div>
                   ))}
-
                   {!showResults && (
                     <Button size="sm" onClick={checkAnswers} className="w-full">
                       提交答案
@@ -185,23 +222,20 @@ function SpeakingSection({ speaking, day }: { speaking: any; day: number }) {
   const answers = MOCK_ENGLISH_ANSWERS[day];
   const { speak } = useSpeech();
   const [showSamples, setShowSamples] = useState(false);
-
   const allDialogue = speaking?.dialogueEn?.join(' ') || '';
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h4 className="text-sm font-semibold text-foreground">口语表达训练</h4>
         <SpeechControls text={allDialogue} />
       </div>
-
       <div>
         <p className="text-xs font-medium text-muted-foreground mb-2">常用表达</p>
         <div className="space-y-1.5">
           {speaking.expressions?.map((exp: any, i: number) => (
             <div
               key={i}
-              className="flex items-start justify-between gap-3 p-2.5 rounded-md bg-muted/30 group"
+              className="flex items-start justify-between gap-3 p-2.5 rounded-md bg-muted/30"
             >
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-foreground font-medium">{exp.en}</p>
@@ -209,7 +243,7 @@ function SpeakingSection({ speaking, day }: { speaking: any; day: number }) {
               </div>
               <button
                 onClick={() => speak(exp.en)}
-                className="size-7 rounded-md bg-card border border-border/60 flex items-center justify-center shrink-0 hover:bg-primary/10 hover:border-primary/30 transition-colors"
+                className="size-7 rounded-md bg-white border border-border/60 flex items-center justify-center shrink-0 hover:bg-primary/10 hover:border-primary/30 transition-colors"
                 aria-label="朗读"
               >
                 <Volume2 className="size-3.5 text-muted-foreground" />
@@ -218,12 +252,11 @@ function SpeakingSection({ speaking, day }: { speaking: any; day: number }) {
           ))}
         </div>
       </div>
-
       <div>
         <p className="text-xs font-medium text-muted-foreground mb-2">
           对话场景：{speaking.dialogueContext}
         </p>
-        <div className="p-3 rounded-lg bg-card border border-border/50 space-y-2">
+        <div className="p-3 rounded-lg bg-white border border-border/50 space-y-2">
           {speaking.dialogueEn?.map((line: string, i: number) => (
             <div key={i} className="text-sm">
               <span className="text-xs text-muted-foreground font-mono mr-2">
@@ -239,7 +272,6 @@ function SpeakingSection({ speaking, day }: { speaking: any; day: number }) {
           ))}
         </div>
       </div>
-
       <div className="p-3 rounded-lg bg-info/5 border border-info/20">
         <div className="flex items-start gap-2">
           <GraduationCap className="size-4.5 text-info shrink-0 mt-0.5" />
@@ -249,7 +281,6 @@ function SpeakingSection({ speaking, day }: { speaking: any; day: number }) {
           </div>
         </div>
       </div>
-
       {answers?.speakingSamples && answers.speakingSamples.length > 0 && (
         <div className="pt-3 border-t border-border/40">
           <Button
@@ -284,7 +315,7 @@ function SpeakingSection({ speaking, day }: { speaking: any; day: number }) {
                         </div>
                         <button
                           onClick={() => speak(en)}
-                          className="size-6 rounded-md bg-card border border-border/60 flex items-center justify-center shrink-0 hover:bg-primary/10 hover:border-primary/30 transition-colors"
+                          className="size-6 rounded-md bg-white border border-border/60 flex items-center justify-center shrink-0 hover:bg-primary/10 hover:border-primary/30 transition-colors"
                           aria-label="朗读"
                         >
                           <Volume2 className="size-3 text-muted-foreground" />
@@ -309,6 +340,8 @@ export default function EnglishDetailPanel({
   onDayChange,
 }: EnglishDetailPanelProps) {
   const data = MOCK_ENGLISH_DAYS.find((d) => d.day === day);
+  const wordLearning = useWordLearning();
+  const [studyOpen, setStudyOpen] = useState(false);
 
   if (!data) {
     return (
@@ -319,6 +352,10 @@ export default function EnglishDetailPanel({
       </Card>
     );
   }
+
+  // 修复：使用 data.vocab 而非 data.vocabulary
+  const words = data.vocab || data.vocabulary || [];
+  const dayStats = wordLearning.getDayStats(day);
 
   return (
     <motion.div
@@ -371,15 +408,42 @@ export default function EnglishDetailPanel({
         </CardContent>
       </Card>
 
+      {/* 核心词汇 - 修复：使用 data.vocab */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <BookOpen className="size-5 text-foreground/70" />
-            核心词汇（{data.vocabulary?.length || 0}个）
-          </CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <BookOpen className="size-5 text-foreground/70" />
+              核心词汇（{words.length}个）
+            </CardTitle>
+            {words.length > 0 && (
+              <Button size="sm" onClick={() => setStudyOpen(true)} className="gap-1.5 shrink-0">
+                <Play className="size-3.5" />
+                开始学习
+              </Button>
+            )}
+          </div>
+          {dayStats.total > 0 && (
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">学习进度：</span>
+              <span className="text-xs"><span className="text-success">●</span> 已掌握 {dayStats.mastered}</span>
+              <span className="text-xs"><span className="text-info">●</span> 熟悉 {dayStats.familiar}</span>
+              <span className="text-xs"><span className="text-warning">●</span> 学习中 {dayStats.learning}</span>
+              <span className="text-xs"><span className="text-muted-foreground">●</span> 未学 {words.length - dayStats.total + dayStats.new}</span>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
-          <WordList words={data.vocabulary || []} />
+          {words.length > 0 ? (
+            <WordList
+              words={words}
+              day={day}
+              getRecord={wordLearning.getRecord}
+              onStudy={wordLearning.studyWord}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">当天暂无词汇数据</p>
+          )}
         </CardContent>
       </Card>
 
@@ -418,6 +482,17 @@ export default function EnglishDetailPanel({
           <ChevronRight className="size-4 ml-1" />
         </Button>
       </div>
+
+      <WordStudyModal
+        open={studyOpen}
+        onClose={() => setStudyOpen(false)}
+        day={day}
+        words={words}
+        getRecord={wordLearning.getRecord}
+        onStudy={wordLearning.studyWord}
+        onMarkUnfamiliar={wordLearning.markUnfamiliar}
+        onMarkMastered={wordLearning.markMastered}
+      />
     </motion.div>
   );
 }

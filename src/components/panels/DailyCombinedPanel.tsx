@@ -15,15 +15,20 @@ import {
   Coffee,
   Sunset,
   Moon,
+  RefreshCw,
 } from 'lucide-react';
 import type { IDayProgress } from '@/hooks/useStudyProgress';
 import { MOCK_ACCOUNTING } from '@/data/accounting';
 import { MOCK_ENGLISH_DAYS } from '@/data/english';
+import { useWordLearning } from '@/hooks/useWordLearning';
+import { useAccountingReview } from '@/hooks/useAccountingReview';
+import { useSelfMediaStore } from '@/hooks/useSelfMediaStore';
 
 interface DailyCombinedPanelProps {
   day: number;
   progress: IDayProgress;
-  onDaySelect?: (day: number, kind: 'accounting' | 'english') => void;
+  onDaySelect?: (day: number, kind: 'accounting' | 'english' | 'selfmedia') => void;
+  onOpenReview?: () => void;
 }
 
 interface TaskCardProps {
@@ -128,12 +133,28 @@ function ScheduleTimeline() {
   );
 }
 
-export default function DailyCombinedPanel({ day, progress, onDaySelect }: DailyCombinedPanelProps) {
+export default function DailyCombinedPanel({ day, progress, onDaySelect, onOpenReview }: DailyCombinedPanelProps) {
   const accountingData = MOCK_ACCOUNTING[day];
   const englishData = MOCK_ENGLISH_DAYS.find((d) => d.day === day);
+  const { getReviewCount: getEnglishReviewCount } = useWordLearning();
+  const { getDueCount: getAccountingDueCount } = useAccountingReview();
+  const smStore = useSelfMediaStore();
 
   const accountingPreview = accountingData?.knowledgePoints.slice(0, 3) || [];
-  const vocabPreview = englishData?.vocabulary?.slice(0, 4) || [];
+  const vocabPreview = englishData?.vocab?.slice(0, 4) || englishData?.vocabulary?.slice(0, 4) || [];
+
+  // 英语复习 + 会计复习 + 自媒体复盘
+  const englishDue = getEnglishReviewCount();
+  const accountingDue = getAccountingDueCount();
+  const smPendingData = smStore.publishes.filter(
+    (p) => p.status === '已发布' &&
+      !smStore.analytics.some((a) => a.publishId === p.id || (p.videoId && a.videoId === p.videoId)),
+  ).length;
+  const smPendingReview = smStore.analytics.filter(
+    (a) => !smStore.reviews.some((r) => r.analyticsId === a.id),
+  ).length;
+  const selfmediaDue = smPendingData + smPendingReview;
+  const totalReviewDue = englishDue + accountingDue + selfmediaDue;
 
   return (
     <div className="space-y-5">
@@ -225,14 +246,11 @@ export default function DailyCombinedPanel({ day, progress, onDaySelect }: Daily
         <TaskCard
           icon={Video}
           title="自媒体运营"
-          description="30分钟：搜集热门视频 + 拆解 + 写脚本"
+          description="今日作战台 + 选题/脚本/发布"
           completed={progress.selfmedia}
           accentColor="text-success"
           bgColor="bg-success/5"
-          onClick={() => {
-            const event = new CustomEvent('navigate-selfmedia');
-            window.dispatchEvent(event);
-          }}
+          onClick={() => onDaySelect?.(day, 'selfmedia')}
         >
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
             <div className="p-2 rounded-md bg-muted/50">
@@ -249,6 +267,49 @@ export default function DailyCombinedPanel({ day, progress, onDaySelect }: Daily
             </div>
           </div>
         </TaskCard>
+
+        {/* 复习中心入口 */}
+        <Card className="border-border/60 bg-gradient-to-r from-primary/5 to-accent/20">
+          <CardContent className="p-4">
+            <button
+              onClick={onOpenReview}
+              className="w-full flex items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-3">
+                <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <RefreshCw className="size-5 text-primary" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-semibold text-foreground">复习中心</p>
+                  <p className="text-xs text-muted-foreground">
+                    {totalReviewDue > 0
+                      ? `今日待处理 ${totalReviewDue} 项`
+                      : '温故知新，巩固已学内容'}
+                  </p>
+                  {totalReviewDue > 0 && (
+                    <div className="flex gap-2 mt-1">
+                      {englishDue > 0 && (
+                        <span className="text-[10px] text-primary">英语复习 {englishDue}</span>
+                      )}
+                      {accountingDue > 0 && (
+                        <span className="text-[10px] text-info">会计复习 {accountingDue}</span>
+                      )}
+                      {selfmediaDue > 0 && (
+                        <span className="text-[10px] text-success">自媒体复盘 {selfmediaDue}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {totalReviewDue > 0 && (
+                  <Badge className="bg-primary text-primary-foreground text-xs">{totalReviewDue}</Badge>
+                )}
+                <ArrowRight className="size-4 text-muted-foreground" />
+              </div>
+            </button>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
