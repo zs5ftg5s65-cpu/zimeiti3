@@ -23,8 +23,8 @@ function emptyShot(n: number): Shot {
   };
 }
 
-interface Props { store: SelfMediaStore; }
-export default function ScriptDirectorPanel({ store }: Props) {
+interface Props { store: SelfMediaStore; currentDay?: number; }
+export default function ScriptDirectorPanel({ store, currentDay = 1 }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showMeta, setShowMeta] = useState(true);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
@@ -32,7 +32,11 @@ export default function ScriptDirectorPanel({ store }: Props) {
   const filtered = store.scripts.filter(
     (s) => s.accountId === store.currentAccount && s.storeId === store.currentStore,
   );
-  const active = filtered.find((s) => s.id === activeId) || filtered[0] || null;
+  const currentDayScripts = filtered.filter((s) => s.day === currentDay).sort((a, b) => b.createdAt - a.createdAt);
+  const currentDayTopic = store.topics
+    .filter((t) => t.accountId === store.currentAccount && t.storeId === store.currentStore && t.day === currentDay)
+    .sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+  const active = filtered.find((s) => s.id === activeId) || currentDayScripts[0] || filtered[0] || null;
 
   // 来源选题
   const sourceTopic = active?.sourceTopicId
@@ -150,8 +154,20 @@ export default function ScriptDirectorPanel({ store }: Props) {
       <AIDisconnectedBanner feature="AI脚本导演" />
 
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium flex items-center gap-1.5"><Film className="size-4" />脚本导演（{filtered.length}）</h3>
-        <Button size="sm" onClick={createScript}><Plus className="size-3.5 mr-1" />新建脚本</Button>
+        <div className="min-w-0">
+          <h3 className="text-sm font-medium flex items-center gap-1.5"><Film className="size-4" />脚本导演（{filtered.length}）</h3>
+          <p className="text-[10px] text-muted-foreground font-normal mt-0.5">当前 Day{currentDay}：{currentDayScripts.length} 条任务脚本 · 自由脚本不受 Day 限制</p>
+        </div>
+        <div className="flex gap-1.5 shrink-0">
+          {currentDayTopic && (
+            <Button size="sm" variant="outline" onClick={() => {
+              const script = store.createScriptFromTopic(currentDayTopic.id, currentDay);
+              if (script) setActiveId(script.id);
+              toast.success("今日完整脚本已生成/打开");
+            }}><Wand2 className="size-3.5 mr-1" />自动生成今日完整脚本</Button>
+          )}
+          <Button size="sm" onClick={createScript}><Plus className="size-3.5 mr-1" />新建自由脚本</Button>
+        </div>
       </div>
 
       {filtered.length > 0 && (
@@ -164,7 +180,7 @@ export default function ScriptDirectorPanel({ store }: Props) {
                   active?.id === s.id ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
                 }`}
               >
-                {s.title.slice(0, 10)}
+                {s.title.slice(0, 10)}{s.day === currentDay ? " · 今日" : s.day ? ` · D${s.day}` : " · 自由"}
               </button>
               <button
                 onClick={(e) => {
@@ -243,7 +259,7 @@ export default function ScriptDirectorPanel({ store }: Props) {
               <p className="text-xs font-medium flex items-center gap-1"><Wand2 className="size-3.5" />外部AI工作流</p>
               <p className="text-xs text-muted-foreground">复制提示词到外部AI生成后粘贴回来。下方按钮分别复制对应操作的提示词。</p>
               <div className="flex flex-wrap gap-1.5">
-                <CopyPromptButton prompt={buildScriptPrompt(store, sourceTopic || undefined)} label="生成完整脚本" />
+                <CopyPromptButton prompt={buildScriptPrompt(store, sourceTopic || undefined, currentDay)} label="生成完整脚本" />
                 <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "重新生成Hook")} label="重生成Hook" />
                 <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "重新生成结尾")} label="重生成结尾" />
                 <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "改为30秒版")} label="30秒版" />

@@ -1,10 +1,19 @@
 // 英语学习30天课程数据
+import {
+  getAdvancedSpeaking,
+  getAdvancedReading,
+  getAdvancedVocab,
+  ADVANCED_DAY_META,
+} from "./englishContentAdvanced";
+
 export interface IVocabWord {
   word: string;
   phonetic: string;
   meaning: string;
   example: string;
   exampleCn: string;
+  // 词性（如 n. / v. / adj.）。旧数据没有该字段时，由 normalizeVocab 从 meaning 前缀解析，保证向后兼容。
+  pos?: string;
 }
 
 export interface IReadingMaterial {
@@ -12,6 +21,8 @@ export interface IReadingMaterial {
   level: string;
   paragraphs: { en: string; cn: string }[];
   vocab: string[];
+  // 文章来源（可选，旧数据没有时前端回退显示 level）
+  source?: string;
 }
 
 export interface ISpeakingExpression {
@@ -56,6 +67,7 @@ export interface IEnglishResource {
 // 第1-7天详细数据
 const day1: IEnglishDay = {
   day: 1, week: 1, theme: "日常生活 Daily Life", level: "B1",
+  title: "日常生活 · 我的一天", category: "基础入门",
   vocab: [
     { word: "routine", phonetic: "/ruːˈtiːn/", meaning: "n. 日常惯例", example: "My morning routine includes coffee and news.", exampleCn: "我的早晨惯例包括喝咖啡和看新闻。" },
     { word: "schedule", phonetic: "/ˈʃedjuːl/", meaning: "n. 日程表", example: "I have a busy schedule today.", exampleCn: "我今天日程很满。" },
@@ -114,6 +126,7 @@ const day1: IEnglishDay = {
 
 const day2: IEnglishDay = {
   day: 2, week: 1, theme: "餐饮与美食 Food & Restaurant", level: "B1",
+  title: "餐饮美食 · 餐厅点餐", category: "基础入门",
   vocab: [
     { word: "menu", phonetic: "/ˈmenjuː/", meaning: "n. 菜单", example: "Can I see the menu?", exampleCn: "我能看一下菜单吗？" },
     { word: "appetizer", phonetic: "/ˈæpɪtaɪzə/", meaning: "n. 开胃菜", example: "We ordered appetizers first.", exampleCn: "我们先点了开胃菜。" },
@@ -172,6 +185,7 @@ const day2: IEnglishDay = {
 // 第3-7天数据（精简结构，保持完整）
 const day3: IEnglishDay = {
   day: 3, week: 1, theme: "工作与职业 Work & Career", level: "B1",
+  title: "工作职业 · 介绍你的工作", category: "基础入门",
   vocab: [
     { word: "colleague", phonetic: "/ˈkɒliːɡ/", meaning: "n. 同事", example: "My colleagues are helpful.", exampleCn: "我的同事很乐于助人。" },
     { word: "deadline", phonetic: "/ˈdedlaɪn/", meaning: "n. 截止日期", example: "The deadline is Friday.", exampleCn: "截止日期是周五。" },
@@ -430,7 +444,7 @@ function buildVocab(words: string[]): IVocabWord[] {
   }));
 }
 
-function buildReading(theme: string, day: number): IReadingMaterial {
+function buildReading(theme: string, _day: number): IReadingMaterial {
   const readings: Record<string, IReadingMaterial> = {
     "旅行与出行 Travel": {
       title: "Tips for First-Time Travelers", level: "B1",
@@ -567,6 +581,8 @@ const day4to7: IEnglishDay[] = themes.map((t, i) => ({
   week: 1,
   theme: t.theme,
   level: "B1",
+  title: t.theme.split(" ")[0] + " · 场景应用",
+  category: ["旅行出行", "健康健身", "购物消费", "娱乐休闲"][i],
   vocab: buildVocab(t.words),
   reading: buildReading(t.theme, i + 4),
   speaking: buildSpeaking(t.theme),
@@ -585,14 +601,22 @@ const weekThemes = [
 
 function buildWeekDay(weekTheme: typeof weekThemes[0], dayInWeek: number, overallDay: number): IEnglishDay {
   const subThemes = ["基础词汇与阅读","口语对话","听力练习","写作表达","综合应用"];
+  const meta = ADVANCED_DAY_META[overallDay];
+  // 优先使用 Day8-30 每天独立的口语/阅读内容；缺失时回退到主题构建（保证不空白、不报错）
+  const advancedSpeaking = getAdvancedSpeaking(overallDay);
+  const advancedReading = getAdvancedReading(overallDay);
+  // Day8-30 每天 10 个独立新单词；缺失时回退到原周词池切片（保证不空白、不报错）
+  const advancedVocab = getAdvancedVocab(overallDay);
   return {
     day: overallDay,
     week: weekTheme.week,
     theme: `${weekTheme.theme} - ${subThemes[dayInWeek - 1]}`,
+    title: meta?.title || `${weekTheme.theme.split(" ")[0]} · 第${overallDay}天`,
+    category: meta?.category || subThemes[dayInWeek - 1],
     level: weekTheme.level,
-    vocab: buildVocab(weekTheme.words.slice((dayInWeek - 1) * 4, dayInWeek * 4)),
-    reading: buildReading(weekTheme.theme.split(" ")[0], overallDay),
-    speaking: buildSpeaking(weekTheme.theme.split(" ")[0]),
+    vocab: advancedVocab.length >= 10 ? advancedVocab : buildVocab(weekTheme.words.slice((dayInWeek - 1) * 4, dayInWeek * 4)),
+    reading: advancedReading || buildReading(weekTheme.theme, overallDay),
+    speaking: advancedSpeaking || buildSpeaking(weekTheme.theme.split(" ")[0]),
     videoTitle: `${weekTheme.theme} English Lesson - Day ${overallDay}`,
     videoSource: "YouTube",
     videoDesc: `${weekTheme.theme}主题英语学习，包含词汇、阅读、口语和听力练习。`,
@@ -612,14 +636,20 @@ for (const wt of weekThemes) {
 }
 // 补齐到30天
 while (overallDay <= 30) {
+  const reviewMeta = ADVANCED_DAY_META[overallDay];
+  const reviewSpeaking = getAdvancedSpeaking(overallDay);
+  const reviewReading = getAdvancedReading(overallDay);
+  const reviewVocab = getAdvancedVocab(overallDay);
   day8to30.push({
     day: overallDay,
     week: 5,
     theme: `综合复习与应用 Review & Practice - Day ${overallDay}`,
+    title: reviewMeta?.title || `综合复习 · 第${overallDay}天`,
+    category: reviewMeta?.category || "综合复习",
     level: "B2+",
-    vocab: buildVocab(["review","practice","summary","progress","achievement","confidence","fluency","accuracy","pronunciation","vocabulary","comprehension","expression","conversation","presentation","discussion","debate","negotiation","persuasion","interaction","feedback"]),
-    reading: buildReading("综合", overallDay),
-    speaking: buildSpeaking("综合"),
+    vocab: reviewVocab.length >= 10 ? reviewVocab : buildVocab(["review","practice","summary","progress","achievement","confidence","fluency","accuracy","pronunciation","vocabulary","comprehension","expression","conversation","presentation","discussion","debate","negotiation","persuasion","interaction","feedback"]),
+    reading: reviewReading || buildReading("综合", overallDay),
+    speaking: reviewSpeaking || buildSpeaking("综合"),
     videoTitle: `English Review & Practice - Day ${overallDay}`,
     videoSource: "YouTube",
     videoDesc: "综合复习课程，巩固前几周所学内容，进行口语和写作综合练习。",
@@ -627,9 +657,21 @@ while (overallDay <= 30) {
   overallDay++;
 }
 
+// 从 meaning 前缀解析词性，例如 "n. 日常惯例" → pos="n.", meaning="日常惯例"
+// 兼容 "n./v. 信任" 这类组合词性；不修改原始单词文本，只做展示层归一。
+const POS_PREFIX_RE = /^((?:[a-z]+\.)(?:\/[a-z]+\.)*)\s*(.*)$/i;
+function normalizeWord(w: IVocabWord): IVocabWord {
+  if (w.pos) return w;
+  const m = w.meaning.match(POS_PREFIX_RE);
+  if (!m) return w;
+  return { ...w, pos: m[1], meaning: m[2].trim() || w.meaning };
+}
+function normalizeDay(d: IEnglishDay): IEnglishDay {
+  return { ...d, vocab: d.vocab.map(normalizeWord) };
+}
 export const MOCK_ENGLISH_DAYS: IEnglishDay[] = [
   day1, day2, day3, ...day4to7, ...day8to30,
-].slice(0, 30);
+].slice(0, 30).map(normalizeDay);
 
 export const MOCK_ENGLISH_RESOURCES: IEnglishResource[] = [
   { name: "BBC Learning English", type: "网站", level: "B1-B2", desc: "BBC官方英语学习网站，包含大量免费课程、视频和音频。", url: "https://www.bbc.co.uk/learningenglish" },

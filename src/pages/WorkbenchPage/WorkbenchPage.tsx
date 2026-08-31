@@ -119,6 +119,14 @@ export default function WorkbenchPage() {
     setCurrentDay(day);
   };
 
+  // 回到今天：统一改 currentDay；若正停在某模块的 Day 详情页，同步把该面板切到今天对应 Day，避免顶部与内容不一致
+  const handleGoToday = (todayDay: number) => {
+    setCurrentDay(todayDay);
+    const kind = selectedItem?.payload?.kind;
+    if (kind === 'accounting-day') setSelectedId(`accounting-day-${todayDay}`);
+    else if (kind === 'english-day') setSelectedId(`english-day-${todayDay}`);
+  };
+
   const handleReviewNavigate = (
     kind: 'accounting' | 'english' | 'selfmedia',
     day?: number,
@@ -240,6 +248,7 @@ export default function WorkbenchPage() {
         todayProgress={progress[currentDay]}
         onMarkComplete={(tasks) => setDayTasks(currentDay, tasks)}
         totalStats={stats}
+        onGoToday={handleGoToday}
       />
       <div className="flex-1 flex overflow-hidden">
         {/* 桌面端侧边栏（md以上显示，自带移动端Sheet但移动端由下方自定义header替代） */}

@@ -12,6 +12,8 @@ import type { SelfMediaStore } from "@/hooks/useSelfMediaStore";
 import type { Topic, TopicRiskLevel, ContentType } from "@/data/selfmedia3-types";
 import { AIDisconnectedBanner, FactConfirmTag, EmptyState, CopyPromptButton } from "./shared";
 import { buildTopicPrompt } from "./aiPrompts";
+import { callAI, extractJSON } from "@/lib/aiService";
+import { loadAIConfig } from "@/lib/aiConfig";
 
 const RISK_META: Record<TopicRiskLevel, { icon: typeof Shield; color: string; desc: string }> = {
   "稳妥型": { icon: Shield, color: "text-green-600 bg-green-50 border-green-200", desc: "已验证方向，风险低" },
@@ -21,9 +23,9 @@ const RISK_META: Record<TopicRiskLevel, { icon: typeof Shield; color: string; de
 
 const CONTENT_TYPES: ContentType[] = ["老板娘口播", "菜品制作", "后厨实拍", "日常vlog", "食材科普", "门店展示", "故事讲述", "团购推荐", "图文笔记"];
 
-interface Props { store: SelfMediaStore; onNavigate?: (tab: string) => void; }
+interface Props { store: SelfMediaStore; onNavigate?: (tab: string) => void; currentDay?: number; }
 
-export default function TopicEnginePanel({ store, onNavigate }: Props) {
+export default function TopicEnginePanel({ store, onNavigate, currentDay = 1 }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<Topic>>({
@@ -37,11 +39,14 @@ export default function TopicEnginePanel({ store, onNavigate }: Props) {
   const filtered = store.topics.filter(
     (t) => t.accountId === store.currentAccount && t.storeId === store.currentStore,
   );
+  const dayTopics = filtered.filter((t) => t.day === currentDay);
+  const freeTopics = filtered.filter((t) => t.day == null);
 
   const handleSave = () => {
     if (!form.title?.trim()) { toast.error("请填写选题标题"); return; }
     store.addTopic({
       title: form.title,
+      day: currentDay,
       riskLevel: form.riskLevel || "稳妥型",
       targetUser: form.targetUser || "",
       painPoint: form.painPoint || "",
@@ -67,38 +72,49 @@ export default function TopicEnginePanel({ store, onNavigate }: Props) {
     setForm({ riskLevel: "稳妥型", contentType: "老板娘口播", involvesCustomer: false, estimatedDuration: "30-60秒", shootingDifficulty: "中等" });
   };
 
-  // 选题→脚本闭环
+  // 选题→脚本闭环：统一由store生成完整可执行脚本
+  const [aiGenerating, setAiGenerating] = useState(false);
+
+  const handleAIGenerate = async () => {
+    if (aiGenerating) return;
+    setAiGenerating(true);
+    try {
+      const result = await callAI(buildTopicPrompt(store, currentDay) + "\n\n【机器读取要求】最后只返回JSON数组，不要Markdown，不要解释。", loadAIConfig());
+      const raw = extractJSON<unknown>(result.content);
+      const list = Array.isArray(raw) ? raw : Array.isArray((raw as { topics?: unknown[] })?.topics) ? (raw as { topics: unknown[] }).topics : [];
+      if (!list.length) throw new Error("AI没有返回有效选题");
+      list.slice(0, 3).forEach((item, index) => {
+        const t = (item || {}) as Record<string, unknown>;
+        store.addTopic({
+          day: currentDay, title: String(t.title || `Day${currentDay} AI选题${index + 1}`),
+          riskLevel: (t.riskLevel || ["稳妥型", "测试型", "突破型"][index]) as TopicRiskLevel,
+          targetUser: String(t.targetUser || ""), painPoint: String(t.painPoint || ""),
+          contentType: (t.contentType || "老板娘口播") as ContentType, coreOpinion: String(t.coreOpinion || ""),
+          recommendedStore: String(t.recommendedStore || ""), recommendedPerson: String(t.recommendedPerson || "老板娘"),
+          recommendedDish: String(t.recommendedDish || ""), hook: String(t.hook || ""), structure: String(t.structure || ""),
+          cta: String(t.cta || ""), reason: String(t.reason || "AI根据今日Day任务生成"), risk: String(t.risk || ""),
+          factsToConfirm: String(t.factsToConfirm || ""), involvesCustomer: Boolean(t.involvesCustomer),
+          estimatedDuration: String(t.estimatedDuration || "30-60秒"), shootingDifficulty: (t.shootingDifficulty || "中等") as "简单" | "中等" | "较难",
+          status: "待采用", createdAt: Date.now() + index,
+        });
+      });
+      toast.success(`AI已生成${Math.min(3, list.length)}个Day${currentDay}选题`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "AI生成失败");
+    } finally { setAiGenerating(false); }
+  };
+
   const handleCreateScript = (topicId: string) => {
-    const topic = store.topics.find((t) => t.id === topicId);
-    if (!topic) return;
-    const existing = store.scripts.find((s) => s.sourceTopicId === topicId);
-    if (existing) {
-      toast.success("已有该选题的脚本");
-      onNavigate?.("script");
-      return;
-    }
-    store.addScript({
-      title: topic.title,
-      sourceTopicId: topic.id,
-      targetUser: topic.targetUser,
-      goal: topic.cta,
-      person: topic.recommendedPerson || "老板娘",
-      dish: topic.recommendedDish,
-      estimatedDuration: topic.estimatedDuration || "45秒",
-      contentType: topic.contentType,
-      shots: [
-        { shotNumber: 1, time: "0-3s", shotSize: "近景", visual: "", action: "", dialogue: topic.hook, subtitle: "", sound: "", shootingNote: "", editingNote: "", isRequired: true, status: "未拍" },
-        { shotNumber: 2, time: "3-15s", shotSize: "中景", visual: "", action: "", dialogue: "", subtitle: "", sound: "", shootingNote: "", editingNote: "", isRequired: true, status: "未拍" },
-        { shotNumber: 3, time: "15-30s", shotSize: "中景", visual: "", action: "", dialogue: "", subtitle: "", sound: "", shootingNote: "", editingNote: "", isRequired: true, status: "未拍" },
-      ],
-      requiredMediaIds: [],
-      shootingOrder: "", requiredShots: "", optionalShots: "",
-      missingMaterials: topic.factsToConfirm ? `需确认：${topic.factsToConfirm}` : "",
-      status: "草稿", createdAt: Date.now(), updatedAt: Date.now(),
-    });
-    store.updateTopic(topicId, { status: "已生成脚本" });
-    toast.success("已根据选题创建脚本");
-    onNavigate?.("script");
+    const script = store.createScriptFromTopic(topicId, currentDay);
+    if (!script) return;
+    toast.success("已生成完整脚本，共8个必拍镜头");
+  };
+
+  const handleAdopt = (topicId: string) => {
+    store.updateTopic(topicId, { status: "已采用" });
+    const script = store.createScriptFromTopic(topicId, currentDay);
+    if (script) toast.success("已采用，并自动生成今日完整脚本");
+    else toast.success("选题已采用");
   };
 
   // 模板参考生成器：从成功模板读取，生成选题建议
@@ -206,11 +222,20 @@ export default function TopicEnginePanel({ store, onNavigate }: Props) {
     <div className="space-y-4">
       <AIDisconnectedBanner feature="AI选题引擎" />
 
+      <Card className="border-primary/20 bg-primary/[0.03]">
+        <CardContent className="p-3 space-y-1.5">
+          <p className="text-xs font-medium">Day {currentDay} 今日选题任务</p>
+          <p className="text-xs text-foreground/80">{store.currentAccount === "guangdeguangying" ? "广德光英土菜馆" : store.currentAccount === "guxiangli" ? "古巷里土菜馆" : "老板娘个人IP"} · 当前30天计划内容</p>
+          <p className="text-xs text-muted-foreground">已绑定今日选题：{dayTopics.length} 个；自由选题：{freeTopics.length} 个。新增选题默认绑定当前 Day。</p>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardContent className="p-3 space-y-2">
           <p className="text-xs font-medium flex items-center gap-1"><Wand2 className="size-3.5" />外部AI工作流</p>
-          <p className="text-xs text-muted-foreground">点击复制完整提示词（已带入账号、门店、人物资料、故事、成功模板、最近选题、拍摄限制），粘贴到外部AI生成后，再手动添加选题。</p>
-          <CopyPromptButton prompt={buildTopicPrompt(store)} label="复制选题AI提示词" />
+          <p className="text-xs text-muted-foreground">已支持真实外部AI：连接成功后可直接生成并保存今日Day选题；未连接时仍可复制Prompt到外部AI。</p>
+          <Button size="sm" onClick={handleAIGenerate} disabled={aiGenerating}><Sparkles className="size-3.5 mr-1" />{aiGenerating ? "AI生成中…" : "AI直接生成今日3个选题"}</Button>
+          <CopyPromptButton prompt={buildTopicPrompt(store, currentDay)} label="复制选题AI提示词" />
         </CardContent>
       </Card>
 
@@ -399,7 +424,7 @@ export default function TopicEnginePanel({ store, onNavigate }: Props) {
                   </div>
                   {t.factsToConfirm && <FactConfirmTag text={t.factsToConfirm} />}
                   <div className="flex gap-1.5 flex-wrap pt-1">
-                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => store.updateTopic(t.id, { status: "已采用" })}>采用</Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleAdopt(t.id)}>采用并生成完整脚本</Button>
                     <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleCreateScript(t.id)}>
                       <FileText className="size-3 mr-1" />生成脚本
                     </Button>

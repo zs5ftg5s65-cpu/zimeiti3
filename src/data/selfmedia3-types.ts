@@ -38,6 +38,8 @@ export type ContentType =
 
 export interface Topic {
   id: string;
+  /** 可选：绑定30天计划Day；不填写表示脚本导演/选题库中的自由内容 */
+  day?: number;
   accountId: AccountId;
   storeId: StoreId;
   title: string;
@@ -134,6 +136,8 @@ export interface Shot {
 
 export interface Script {
   id: string;
+  /** 可选：绑定30天计划Day；不填写表示脚本导演中的自由脚本 */
+  day?: number;
   accountId: AccountId;
   storeId: StoreId;
   topicId?: string;
@@ -192,7 +196,45 @@ export interface MediaItem {
   isUsed: boolean;
   usedVideoId: string;
   remark: string;
+  /** 新增：视频原文件保存在IndexedDB，localStorage只保存引用ID */
+  fileRefId?: string;
+  videoWidth?: number;
+  videoHeight?: number;
+  /** 新增：视频AI拆解状态，不影响旧素材结构 */
+  analysisStatus?: "未分析" | "分析中" | "已分析" | "分析失败";
   createdAt: number;
+}
+
+export interface VideoAnalysis {
+  id: string;
+  mediaId: string;
+  accountId: AccountId;
+  storeId: StoreId;
+  transcript: string;
+  frameCount: number;
+  status: "草稿" | "分析中" | "已完成" | "失败";
+  summary: string;
+  hook: string;
+  opening3s: string;
+  opening5s: string;
+  person: string;
+  persona: string;
+  structure: string;
+  conflict: string;
+  contrast: string;
+  emotion: string;
+  dialogue: string;
+  shots: string;
+  pacing: string;
+  subtitles: string;
+  cta: string;
+  highlights: string;
+  weaknesses: string;
+  copyPoints: string;
+  avoidPoints: string;
+  adaptation: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // ============ 发布管理 ============
@@ -371,6 +413,34 @@ export interface HotCase {
   data: string;
   verified: boolean; // 核验状态
   remark: string;
+  /** Phase 6：联网候选与AI拆解字段，全部可选以兼容旧案例 */
+  sourceType?: "manual" | "web_search" | "platform_api";
+  sourceQuery?: string;
+  relevanceScore?: number;
+  hotRank?: number;
+  metrics?: string;
+  analysisStatus?: "未分析" | "分析中" | "已分析" | "分析失败";
+  analysis?: HotCaseAnalysis;
+  generatedTopicId?: string;
+  generatedScriptId?: string;
+}
+
+export interface HotCaseAnalysis {
+  summary: string;
+  hook: string;
+  opening: string;
+  structure: string;
+  persona: string;
+  emotion: string;
+  pacing: string;
+  cta: string;
+  highlights: string;
+  weaknesses: string;
+  copyPoints: string;
+  avoidPoints: string;
+  adaptation: string;
+  fitToTodayTask: string;
+  createdAt: number;
 }
 
 // ============ 今日作战台状态（按账号+门店+Day隔离） ============

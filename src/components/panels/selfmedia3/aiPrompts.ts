@@ -1,6 +1,7 @@
 // AI提示词生成器 — 自动带入当前账号、门店、人物资料、故事、模板、拍摄限制
 import type { SelfMediaStore } from "@/hooks/useSelfMediaStore";
 import { accountName, storeName, type Topic, type Script } from "@/data/selfmedia3-types";
+import { THIRTY_DAY_PLAN } from "@/data/selfmedia-daily";
 
 const SHOOTING_RULES = `拍摄限制（必须严格遵守）：
 - 不拍客人、不拍客人正脸、不要求顾客出镜
@@ -69,11 +70,18 @@ function contextBlock(store: SelfMediaStore): string {
   return lines.join("\n");
 }
 
-export function buildTopicPrompt(store: SelfMediaStore): string {
+export function buildTopicPrompt(store: SelfMediaStore, currentDay = 1): string {
+  const dayPlan = THIRTY_DAY_PLAN.find((d) => d.day === currentDay);
+  const dayContext = dayPlan
+    ? `【今日30天任务（Day${currentDay}）】\n主题：${dayPlan.dailyTheme}\n目标：${dayPlan.dailyGoal}\n选题方向：${dayPlan.topic}\n拍摄任务：${dayPlan.shootingTask}\n脚本任务：${dayPlan.scriptTask}\n必须产出：${dayPlan.mustProduce}\n`
+    : "";
   return `你是一位餐饮实体店短视频运营专家。请为以下账号生成3个短视频选题（稳妥型、测试型、突破型各1个）。
 
 ${contextBlock(store)}
+${dayContext}
 ${SHOOTING_RULES}
+
+选题必须优先服务今日Day任务，不要生成与今日任务无关的泛娱乐内容。
 
 目标客户：30-50岁实体老板、都市蓝领、商务宴请、朋友聚餐、家庭聚餐（江阴及周边）。
 核心目标：本地曝光→建立信任→菜品认知→私信→到店→团购→复购→转介绍，不是单纯涨粉。
@@ -99,7 +107,11 @@ ${SHOOTING_RULES}
 要求：老板娘说话要真实、直爽、口语化，不要AI腔，不要假大空，不要天天喊累，不要虚构励志故事。三个选题不要与最近选题高度重复。`;
 }
 
-export function buildScriptPrompt(store: SelfMediaStore, topic?: Topic): string {
+export function buildScriptPrompt(store: SelfMediaStore, topic?: Topic, currentDay = topic?.day ?? 1): string {
+  const dayPlan = THIRTY_DAY_PLAN.find((d) => d.day === currentDay);
+  const dayContext = dayPlan
+    ? `今日30天任务：Day${currentDay}｜${dayPlan.dailyTheme}\n今日目标：${dayPlan.dailyGoal}\n今日拍摄任务：${dayPlan.shootingTask}\n今日脚本任务：${dayPlan.scriptTask}\n`
+    : "";
   const topicInfo = topic
     ? `来源选题：${topic.title}\n类型：${topic.contentType}\nHook：${topic.hook}\n结构：${topic.structure}\nCTA：${topic.cta}\n推荐菜品：${topic.recommendedDish}\n`
     : "";
@@ -107,6 +119,7 @@ export function buildScriptPrompt(store: SelfMediaStore, topic?: Topic): string 
   return `你是一位餐饮短视频导演。请根据以下信息生成一份可执行的拍摄脚本（逐镜头拍摄执行表）。
 
 ${contextBlock(store)}
+${dayContext}
 ${topicInfo}
 ${SHOOTING_RULES}
 

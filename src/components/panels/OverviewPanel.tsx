@@ -17,6 +17,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import { useStudyProgress } from '@/hooks/useStudyProgress';
+import { getDayDate, formatDateISO } from '@/lib/studyDate';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -154,7 +155,7 @@ function SchedulePanel() {
 }
 
 function CheckinPanel({ onDaySelect }: { onDaySelect?: (day: number) => void }) {
-  const { progress, toggleTask, stats, completedDays, resetAll } = useStudyProgress();
+  const { progress, toggleTask, stats, completedDays, resetAll, currentDay } = useStudyProgress();
   const [showReset, setShowReset] = useState(false);
 
   const days = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -270,19 +271,27 @@ function CheckinPanel({ onDaySelect }: { onDaySelect?: (day: number) => void }) 
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="whitespace-nowrap text-center w-24">天数</TableHead>
-                  <TableHead className="whitespace-nowrap text-center w-24">会计</TableHead>
-                  <TableHead className="whitespace-nowrap text-center w-24">英语</TableHead>
-                  <TableHead className="whitespace-nowrap text-center w-24">自媒体</TableHead>
+                  <TableHead className="whitespace-nowrap text-center w-20">天数</TableHead>
+                  <TableHead className="whitespace-nowrap text-center w-24">日期</TableHead>
+                  <TableHead className="whitespace-nowrap text-center w-20">会计</TableHead>
+                  <TableHead className="whitespace-nowrap text-center w-20">英语</TableHead>
+                  <TableHead className="whitespace-nowrap text-center w-20">自媒体</TableHead>
                   <TableHead className="whitespace-nowrap text-center">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {days.map((day) => {
                   const dp = progress[day];
+                  const isCurrent = day === currentDay;
                   return (
-                    <TableRow key={day}>
-                      <TableCell className="text-center font-medium">第{day}天</TableCell>
+                    <TableRow key={day} className={isCurrent ? 'bg-primary/[0.06]' : undefined}>
+                      <TableCell className={isCurrent ? 'text-center font-bold text-primary' : 'text-center font-medium'}>
+                        第{day}天
+                        {isCurrent && <span className="block text-[10px] text-primary">当前</span>}
+                      </TableCell>
+                      <TableCell className="text-center text-xs text-muted-foreground whitespace-nowrap">
+                        {formatDateISO(getDayDate(day))}
+                      </TableCell>
                       <TableCell className="text-center">
                         <button
                           onClick={() => toggleTask(day, 'accounting')}

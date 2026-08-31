@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Circle, CalendarDays, ChevronDown, Sparkles } from 'lucide-react';
+import { Check, Circle, CalendarDays, ChevronDown, Sparkles, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -9,25 +9,30 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import type { IDayProgress } from '@/hooks/useStudyProgress';
+import { getDayDate, formatDateCN, weekdayCN, getTodayDay } from '@/lib/studyDate';
 
 interface TopProgressBarProps {
   currentDay: number;
   todayProgress: IDayProgress;
   onMarkComplete: (tasks: Partial<IDayProgress>) => void;
   totalStats: { accounting: number; english: number; selfmedia: number };
+  /** 点击"回到今天"时回调；不传则不显示该按钮 */
+  onGoToday?: (todayDay: number) => void;
 }
-
-const weekdayMap = ['日', '一', '二', '三', '四', '五', '六'];
 
 export default function TopProgressBar({
   currentDay,
   todayProgress,
   onMarkComplete,
   totalStats,
+  onGoToday,
 }: TopProgressBarProps) {
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
-  const weekday = weekdayMap[now.getDay()];
+  // 日期来自"开始日期 + Day"，不再用 new Date() 写死，切换 Day 时日期一起变（本地时区）
+  const dayDate = getDayDate(currentDay);
+  const dateStr = formatDateCN(dayDate);
+  const weekday = weekdayCN(dayDate);
+  const todayDay = getTodayDay();
+  const isToday = todayDay != null && todayDay === currentDay;
 
   const percent = Math.round(
     ((todayProgress.accounting ? 1 : 0) + (todayProgress.english ? 1 : 0) + (todayProgress.selfmedia ? 1 : 0)) / 3 * 100,
@@ -62,9 +67,22 @@ export default function TopProgressBar({
                 今日进度 {percent}%
               </Badge>
             </div>
-            <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-              <CalendarDays className="size-3.5" />
-              {dateStr} 星期{weekday}
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap">
+              <span className="flex items-center gap-1">
+                <CalendarDays className="size-3.5" />
+                {dateStr} 星期{weekday}
+              </span>
+              {isToday && <span className="text-primary">· 今天</span>}
+              {!isToday && todayDay != null && onGoToday && (
+                <button
+                  type="button"
+                  onClick={() => onGoToday(todayDay)}
+                  className="inline-flex items-center gap-1 text-info hover:underline"
+                >
+                  <CalendarClock className="size-3.5" />
+                  回到今天(Day{todayDay})
+                </button>
+              )}
             </div>
           </div>
         </div>

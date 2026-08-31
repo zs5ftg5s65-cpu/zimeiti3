@@ -3,10 +3,12 @@ import { scopedStorage } from "@/lib/storage";
 import { toast } from "sonner";
 import type {
   Topic, Character, Story, Script, MediaItem, PublishRecord,
-  VideoAnalytics, Review, AdDecision, LabExperiment, WinningTemplate, HotCase,
+  VideoAnalytics, VideoAnalysis, Review, AdDecision, LabExperiment, WinningTemplate, HotCase,
   AccountId, StoreId, WarRoomByScope, WarRoomTasks, ScopeType,
 } from "@/data/selfmedia3-types";
 import { EMPTY_WAR_ROOM_TASKS, warRoomKey, isCharacterVisible } from "@/data/selfmedia3-types";
+import { THIRTY_DAY_PLAN } from "@/data/selfmedia-daily";
+import { buildCompleteScriptFromTopic } from "@/components/panels/selfmedia3/scriptGenerator";
 
 // 所有自媒体3.0数据的存储key前缀
 const KEY_PREFIX = "__sm3_";
@@ -107,6 +109,7 @@ const SCOPED_ENTITIES: { key: string; validate: (_it: Record<string, unknown>) =
   { key: "stories", validate: () => true },
   { key: "scripts", validate: () => true },
   { key: "media", validate: () => true },
+  { key: "videoAnalyses", validate: () => true },
   { key: "publishes", validate: () => true },
   { key: "analytics", validate: () => true },
   { key: "reviews", validate: () => true },
@@ -135,6 +138,7 @@ export function useSelfMediaStore() {
   const [stories, setStories] = useState<Story[]>(() => load(KEYS.stories, []));
   const [scripts, setScripts] = useState<Script[]>(() => load(KEYS.scripts, []));
   const [media, setMedia] = useState<MediaItem[]>(() => load(KEYS.media, []));
+  const [videoAnalyses, setVideoAnalyses] = useState<VideoAnalysis[]>(() => load("__sm3_video_analyses", []));
   const [publishes, setPublishes] = useState<PublishRecord[]>(() => load(KEYS.publishes, []));
   const [analytics, setAnalytics] = useState<VideoAnalytics[]>(() => load(KEYS.analytics, []));
   const [reviews, setReviews] = useState<Review[]>(() => load(KEYS.reviews, []));
@@ -158,6 +162,7 @@ export function useSelfMediaStore() {
   useEffect(() => { save(KEYS.stories, stories); }, [stories]);
   useEffect(() => { save(KEYS.scripts, scripts); }, [scripts]);
   useEffect(() => { save(KEYS.media, media); }, [media]);
+  useEffect(() => { save("__sm3_video_analyses", videoAnalyses); }, [videoAnalyses]);
   useEffect(() => { save(KEYS.publishes, publishes); }, [publishes]);
   useEffect(() => { save(KEYS.analytics, analytics); }, [analytics]);
   useEffect(() => { save(KEYS.reviews, reviews); }, [reviews]);
@@ -223,6 +228,40 @@ export function useSelfMediaStore() {
   const filterByCurrent = useCallback(<T extends { accountId: AccountId; storeId: StoreId }>(list: T[]) => {
     return list.filter((it) => it.accountId === currentAccount && it.storeId === currentStore);
   }, [currentAccount, currentStore]);
+
+  // ============ 今日选题 → 完整脚本（统一闭环入口） ============
+  const createScriptFromTopic = useCallback((topicId: string, dayOverride?: number): Script | null => {
+    const topic = topics.find((t) =>
+      t.id === topicId &&
+      t.accountId === currentAccount &&
+      t.storeId === currentStore
+    );
+    if (!topic) {
+      toast.error("未找到当前账号/门店下的选题");
+      return null;
+    }
+
+    const targetDay = dayOverride ?? topic.day;
+    const existing = scripts.find((s) =>
+      s.sourceTopicId === topic.id &&
+      s.accountId === currentAccount &&
+      s.storeId === currentStore &&
+      (targetDay == null || s.day === targetDay)
+    );
+    if (existing) {
+      if (topic.status !== "已生成脚本") updateScoped(setTopics, topic.id, { status: "已生成脚本" });
+      return existing;
+    }
+
+    const dayPlan = targetDay ? THIRTY_DAY_PLAN.find((d) => d.day === targetDay) : undefined;
+    const payload = buildCompleteScriptFromTopic(
+      targetDay != null && topic.day !== targetDay ? { ...topic, day: targetDay } : topic,
+      dayPlan,
+    );
+    const created = addScoped(setScripts, payload);
+    updateScoped(setTopics, topic.id, { status: "已生成脚本" });
+    return created;
+  }, [topics, scripts, currentAccount, currentStore, addScoped, updateScoped]);
 
   // ============ 人物库特殊处理（支持 shared） ============
   // 获取当前scope可见的人物：当前scope私有 + shared
@@ -298,6 +337,15 @@ export function useSelfMediaStore() {
     });
   }, [currentAccount, currentStore]);
 
+  const setWarRoomTask = useCallback((day: number, taskKey: keyof WarRoomTasks, value: boolean) => {
+    const key = warRoomKey(currentAccount, currentStore, day);
+    setWarRoomByScope((prev) => {
+      const current = prev[key] || { ...EMPTY_WAR_ROOM_TASKS };
+      if (current[taskKey] === value) return prev;
+      return { ...prev, [key]: { ...current, [taskKey]: value } };
+    });
+  }, [currentAccount, currentStore]);
+
   // ============ 数据导出（支持 scope 过滤） ============
   const exportData = useCallback((scope: "all" | "account" | "store" = "all"): ExportData => {
     const filterScope = <T extends { accountId: AccountId; storeId: StoreId }>(list: T[]): T[] => {
@@ -313,6 +361,7 @@ export function useSelfMediaStore() {
     data.stories = filterScope(stories);
     data.scripts = filterScope(scripts);
     data.media = filterScope(media);
+    data.videoAnalyses = filterScope(videoAnalyses);
     data.publishes = filterScope(publishes);
     data.analytics = filterScope(analytics);
     data.reviews = filterScope(reviews);
@@ -332,7 +381,7 @@ export function useSelfMediaStore() {
       data.warRoomByScope = filtered;
     }
     return { version: "3.0", exportedAt: Date.now(), scope, data };
-  }, [topics, characters, stories, scripts, media, publishes, analytics, reviews, adDecisions, experiments, templates, hotCases, warRoomByScope, currentAccount, currentStore]);
+  }, [topics, characters, stories, scripts, media, videoAnalyses, publishes, analytics, reviews, adDecisions, experiments, templates, hotCases, warRoomByScope, currentAccount, currentStore]);
 
   // ============ 导入预览（不写入，只统计） ============
   const previewImport = useCallback((imported: ExportData): ImportPreview => {
@@ -455,7 +504,7 @@ export function useSelfMediaStore() {
           (it) => it && it.id && it.accountId === currentAccount && it.storeId === currentStore,
         );
         const setterMap: Record<string, React.Dispatch<React.SetStateAction<any[]>>> = {
-          topics: setTopics, stories: setStories, scripts: setScripts, media: setMedia,
+          topics: setTopics, stories: setStories, scripts: setScripts, media: setMedia, videoAnalyses: setVideoAnalyses,
           publishes: setPublishes, analytics: setAnalytics, reviews: setReviews,
           adDecisions: setAdDecisions, experiments: setLabExperiments, templates: setTemplates, hotCases: setHotCases,
         };
@@ -490,12 +539,12 @@ export function useSelfMediaStore() {
   return {
     // 状态
     topics, characters, stories, scripts, media, publishes, analytics,
-    reviews, adDecisions, experiments, templates, hotCases, warRoomByScope,
+    reviews, adDecisions, experiments, templates, hotCases, videoAnalyses, warRoomByScope,
     currentAccount, currentStore,
     // 账号门店
     setCurrentAccount, setCurrentStore,
     // 作战台
-    getWarRoomTasks, toggleWarRoomTask,
+    getWarRoomTasks, toggleWarRoomTask, setWarRoomTask,
     // 导出导入
     exportData, importData, previewImport,
     // 人物库（含shared支持）
@@ -503,6 +552,7 @@ export function useSelfMediaStore() {
     addCharacter, updateCharacter, removeCharacter,
     // CRUD
     addTopic: (t: Omit<Topic, "id" | "accountId" | "storeId">) => addScoped(setTopics, t),
+    createScriptFromTopic,
     updateTopic: (id: string, patch: Partial<Topic>) => updateScoped(setTopics, id, patch),
     removeTopic: (id: string) => removeScoped(setTopics, id),
     addStory: (s: Omit<Story, "id" | "accountId" | "storeId">) => addScoped(setStories, s),
@@ -514,6 +564,9 @@ export function useSelfMediaStore() {
     addMedia: (m: Omit<MediaItem, "id" | "accountId" | "storeId">) => addScoped(setMedia, m),
     updateMedia: (id: string, patch: Partial<MediaItem>) => updateScoped(setMedia, id, patch),
     removeMedia: (id: string) => removeScoped(setMedia, id),
+    addVideoAnalysis: (a: Omit<VideoAnalysis, "id" | "accountId" | "storeId">) => addScoped(setVideoAnalyses, a),
+    updateVideoAnalysis: (id: string, patch: Partial<VideoAnalysis>) => updateScoped(setVideoAnalyses, id, patch),
+    removeVideoAnalysis: (id: string) => removeScoped(setVideoAnalyses, id),
     addPublish: (p: Omit<PublishRecord, "id" | "accountId" | "storeId">) => addScoped(setPublishes, p),
     updatePublish: (id: string, patch: Partial<PublishRecord>) => updateScoped(setPublishes, id, patch),
     removePublish: (id: string) => removeScoped(setPublishes, id),

@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Video, FileText, BarChart3, Lightbulb, CheckCircle2, EyeOff,
   CalendarDays, Sparkles, Target, Folder, Store, User, Send, Film,
-  BookOpen, Award, Flame, FlaskConical, TrendingUp, LayoutDashboard,
+  BookOpen, Award, Flame, FlaskConical, TrendingUp, LayoutDashboard, Bot,
 } from "lucide-react";
 import { MOCK_SELFMEDIA_MODULES } from "@/data/selfmedia";
 import { MOCK_SELFMEDIA_DAILY } from "@/data/selfmedia-daily";
@@ -27,6 +27,7 @@ import AdDecisionPanel from "@/components/panels/selfmedia3/AdDecisionPanel";
 import ContentLabPanel from "@/components/panels/selfmedia3/ContentLabPanel";
 import WinningTemplatesPanel from "@/components/panels/selfmedia3/WinningTemplatesPanel";
 import HotCasesPanel from "@/components/panels/selfmedia3/HotCasesPanel";
+import AISettingsPanel from "@/components/panels/selfmedia3/AISettingsPanel";
 // 旧面板（仅保留静态知识库和30天计划用的引用）
 import OperationRefPanel from "@/components/panels/selfmedia/OperationRefPanel";
 
@@ -53,6 +54,7 @@ const SM3_TABS = [
   { value: "lab", label: "内容实验室", icon: FlaskConical },
   { value: "templates", label: "成功模板", icon: Award },
   { value: "hotcases", label: "热门案例", icon: Flame },
+  { value: "aisettings", label: "AI设置", icon: Bot },
   { value: "knowledge", label: "知识库", icon: Lightbulb },
   { value: "daily", label: "30天计划", icon: CalendarDays },
 ] as const;
@@ -246,13 +248,13 @@ export default function SelfmediaPanel({ activeModule, initialTab, isCompleted, 
       case "warroom":
         return <WarRoomPanel store={store} currentDay={currentDay} onNavigate={(t) => setTab(t as TabValue)} />;
       case "topic":
-        return <TopicEnginePanel store={store} onNavigate={(t) => setTab(t as TabValue)} />;
+        return <TopicEnginePanel store={store} currentDay={currentDay} onNavigate={(t) => setTab(t as TabValue)} />;
       case "character":
         return <CharacterPanel store={store} />;
       case "story":
         return <StoryLibraryPanel store={store} />;
       case "script":
-        return <ScriptDirectorPanel store={store} />;
+        return <ScriptDirectorPanel store={store} currentDay={currentDay} />;
       case "media":
         return <MediaLibraryPanel store={store} />;
       case "publish":
@@ -268,7 +270,9 @@ export default function SelfmediaPanel({ activeModule, initialTab, isCompleted, 
       case "templates":
         return <WinningTemplatesPanel store={store} />;
       case "hotcases":
-        return <HotCasesPanel store={store} />;
+        return <HotCasesPanel store={store} currentDay={currentDay} />;
+      case "aisettings":
+        return <AISettingsPanel />;
       case "knowledge":
         return (
           <div className="space-y-4">

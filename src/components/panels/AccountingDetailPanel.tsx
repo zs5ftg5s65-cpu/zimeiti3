@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { MOCK_ACCOUNTING } from '@/data/accounting';
 import { MOCK_ACCOUNTING_ANSWERS } from '@/data/accountingAnswers';
+import { formatDayLabelCN } from '@/lib/studyDate';
 import { toast } from 'sonner';
 
 interface AccountingDetailPanelProps {
@@ -66,6 +67,9 @@ export default function AccountingDetailPanel({
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-xs">
             第{day}天 / 30天
+          </Badge>
+          <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
+            {formatDayLabelCN(day)}
           </Badge>
           <Badge variant="secondary" className="text-xs">
             {data.stage}

@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { scopedStorage } from '@/lib/storage';
+import {
+  ensureStartDateISO,
+  resetStartDateISO,
+  todayISOLocal,
+  getTodayDay,
+} from '@/lib/studyDate';
 
 export interface IDayProgress {
   accounting: boolean;
@@ -51,6 +57,8 @@ export function useStudyProgress() {
     }
     return 1;
   });
+  // 30天计划开始日期：只在首次不存在时建立一次，之后刷新/重开都复用，绝不被今天覆盖
+  const [startDate, setStartDate] = useState<string>(() => ensureStartDateISO());
 
   // 持久化
   useEffect(() => {
@@ -98,6 +106,11 @@ export function useStudyProgress() {
   }, []);
 
   const resetAll = useCallback(() => {
+    // 显式重置：清空进度与选中天，并清除开始日期，使新计划在下次进入时以"当天"重新建立
+    resetStartDateISO();
+    const fresh = todayISOLocal();
+    scopedStorage.setItem('__app_study_start_date', fresh);
+    setStartDate(fresh);
     setProgress(createInitialProgress());
     setCurrentDayState(1);
   }, []);
@@ -114,9 +127,13 @@ export function useStudyProgress() {
     (p) => p.accounting && p.english && p.selfmedia,
   ).length;
 
+  // 今天对应计划第几天（1..30，超出区间为 null）；仅用于"回到今天"，不自动覆盖选中天
+  const todayDay = getTodayDay(startDate);
   return {
     progress,
     currentDay,
+    startDate,
+    todayDay,
     setCurrentDay,
     toggleTask,
     setDayTasks,

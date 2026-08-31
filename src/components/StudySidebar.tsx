@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { scopedStorage } from '@/lib/storage';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
@@ -67,12 +67,14 @@ function SidebarNav({
   onSelect,
   progress,
   isCollapsed,
+  currentDay,
 }: {
   items: NavItem[];
   selectedId: string;
   onSelect: (item: NavItem) => void;
   progress: IStudyProgress;
   isCollapsed: boolean;
+  currentDay: number;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
     try {
@@ -88,6 +90,33 @@ function SidebarNav({
     };
   });
 
+  // 选中项变化时，自动展开其所在的分组/阶段，保证当前 Day 在侧栏可见
+  useEffect(() => {
+    const chain: string[] = [];
+    const walk = (list: NavItem[], ancestors: string[]): boolean => {
+      for (const it of list) {
+        if (it.id === selectedId) {
+          chain.push(...ancestors);
+          return true;
+        }
+        if (it.children && walk(it.children, [...ancestors, it.id])) return true;
+      }
+      return false;
+    };
+    walk(items, []);
+    if (chain.length) {
+      setExpanded((prev) => {
+        const merged = { ...prev };
+        let changed = false;
+        chain.forEach((id) => {
+          if (!merged[id]) { merged[id] = true; changed = true; }
+        });
+        return changed ? merged : prev;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
   const toggleGroup = (id: string) => {
     setExpanded((prev) => {
       const next = { ...prev, [id]: !prev[id] };
@@ -102,6 +131,8 @@ function SidebarNav({
 
   const renderItem = (item: NavItem, depth: number = 0) => {
     const isSelected = selectedId === item.id;
+    // 当前选中 Day：即使正在看另一模块，也把"同一天"的各模块入口标出，一眼知道当前在第几天
+    const isCurrentDay = typeof item.payload?.day === 'number' && item.payload.day === currentDay;
     const hasChildren = item.children && item.children.length > 0;
     const isExpanded = expanded[item.id];
     const Icon = item.type === 'group' ? getIconForGroup(item.label, item.id) : null;
@@ -166,15 +197,21 @@ function SidebarNav({
       <button
         key={item.id}
         onClick={() => onSelect(item)}
+        aria-current={isSelected ? 'page' : undefined}
         className={cn(
-          'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors text-left',
+          'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors text-left border',
           isSelected
-            ? 'bg-primary/10 text-primary font-medium'
-            : 'text-foreground/70 hover:bg-accent/40 hover:text-foreground',
+            ? 'bg-primary/15 text-primary font-semibold border-primary/40 shadow-sm'
+            : isCurrentDay
+            ? 'bg-primary/5 text-foreground font-medium border-primary/25'
+            : 'text-foreground/70 border-transparent hover:bg-accent/40 hover:text-foreground',
         )}
       >
         {progressIcon || <span className="size-3.5 shrink-0" />}
         <span className="flex-1 truncate">{item.label}</span>
+        {isCurrentDay && !isSelected && (
+          <span className="size-1.5 rounded-full bg-primary shrink-0" aria-hidden />
+        )}
       </button>
     );
   };
@@ -277,6 +314,7 @@ export default function StudySidebar({
           onSelect={onSelect}
           progress={progress}
           isCollapsed={isCollapsed}
+          currentDay={currentDay}
         />
       </ScrollArea>
 
@@ -327,6 +365,7 @@ export default function StudySidebar({
             onSelect={onSelect}
             progress={progress}
             isCollapsed={false}
+            currentDay={currentDay}
           />
         </ScrollArea>
         <div className="px-3 py-3 border-t border-border/40">

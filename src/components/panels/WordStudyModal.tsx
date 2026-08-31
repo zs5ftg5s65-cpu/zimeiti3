@@ -16,6 +16,7 @@ interface WordStudyModalProps {
   onClose: () => void;
   day: number;
   words: IVocabWord[];
+  hideCn?: boolean;
   getRecord: (day: number, word: string) => WordRecord | undefined;
   onStudy: (day: number, word: string, mastery: WordMastery) => void;
   onMarkUnfamiliar: (day: number, word: string) => void;
@@ -41,6 +42,7 @@ export default function WordStudyModal({
   onClose,
   day,
   words,
+  hideCn = false,
   getRecord,
   onStudy,
   onMarkUnfamiliar,
@@ -143,8 +145,11 @@ export default function WordStudyModal({
                   <Volume2 className={cn('size-4 text-primary', isSpeaking && 'animate-pulse')} />
                 </button>
               </div>
-              <p className="text-sm text-muted-foreground font-mono mb-1">{word.phonetic}</p>
-              <p className="text-base text-foreground/90 mb-4">{word.meaning}</p>
+              <p className="text-sm text-muted-foreground font-mono mb-1">
+                {word.phonetic}{word.pos ? <span className="italic ml-2">{word.pos}</span> : null}
+              </p>
+              {!hideCn && <p className="text-base text-foreground/90 mb-4">{word.meaning}</p>}
+              {hideCn && <div className="mb-4" />}
 
               {showAnswer ? (
                 <motion.div
@@ -155,7 +160,7 @@ export default function WordStudyModal({
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">例句</p>
                     <p className="text-sm text-foreground/90">{word.example}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{word.exampleCn}</p>
+                    {!hideCn && <p className="text-xs text-muted-foreground mt-1">{word.exampleCn}</p>}
                   </div>
                   <button
                     onClick={() => speak(word.example)}
