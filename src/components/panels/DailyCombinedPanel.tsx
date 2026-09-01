@@ -134,19 +134,6 @@ function ScheduleTimeline() {
                   <p className="text-sm font-medium text-foreground">{s.title}</p>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{s.desc}</p>
-                {hotAnalyses[h.url || `${h.platform}-${h.title}`] && (() => {
-                  const a = hotAnalyses[h.url || `${h.platform}-${h.title}`];
-                  return (
-                    <div className="mt-2 rounded-md bg-muted/40 p-2.5 text-[10px] space-y-1">
-                      <p><b>为什么值得参考：</b>{a.summary}</p>
-                      <p><b>Hook：</b>{a.hook}</p>
-                      <p><b>结构：</b>{a.structure}</p>
-                      <p><b>可迁移：</b>{a.copyPoints}</p>
-                      <p><b>不要照抄：</b>{a.avoidPoints}</p>
-                      <p><b>今日改造：</b>{a.adaptation}</p>
-                    </div>
-                  );
-                })()}
               </div>
             </div>
           ))}
