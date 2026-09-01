@@ -15,8 +15,7 @@ import { ShootingRestrictionBadge, DataBackupBar } from "./shared";
 import { buildTopicPrompt, buildScriptPrompt } from "./aiPrompts";
 import { callAI, extractJSON } from "@/lib/aiService";
 import { loadAIConfig } from "@/lib/aiConfig";
-import { fetchHotCandidates } from "@/lib/hotService";
-import { normalizeHotAnalysis } from "@/lib/hotService";
+import { fetchHotCandidates, buildHotAnalysisPrompt, normalizeHotAnalysis } from "@/lib/hotService";
 import type { ContentType, TopicRiskLevel, Shot } from "@/data/selfmedia3-types";
 
 interface Props {
