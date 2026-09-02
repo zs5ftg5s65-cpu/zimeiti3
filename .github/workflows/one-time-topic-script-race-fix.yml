@@ -29,3 +29,4 @@ jobs:
           git add src/components/panels/selfmedia3/WarRoomPanel.tsx
           git commit -m 'fix: use newly created topic when generating script' || exit 0
           git push
+# trigger: topic-script-race
