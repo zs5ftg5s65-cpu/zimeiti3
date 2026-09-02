@@ -1,12 +1,9 @@
 name: one-time-topic-script-race-fix
-on:
-  push:
-    branches: [main]
+on: push
 permissions:
   contents: write
 jobs:
   fix:
-    if: contains(github.event.head_commit.message, 'trigger: topic-script-race')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,15 +15,14 @@ jobs:
           s = p.read_text(encoding='utf-8')
           old = 'const script = store.createScriptFromTopic(topic.id, currentDay);'
           new = 'const script = store.createScriptFromTopic(topic, currentDay);'
-          if old not in s:
-              raise SystemExit('expected call site not found')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          if old in s:
+              p.write_text(s.replace(old, new, 1), encoding='utf-8')
           PY
-      - name: Commit patch
+      - name: Commit patch if needed
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/components/panels/selfmedia3/WarRoomPanel.tsx
-          git commit -m 'fix: use newly created topic when generating script' || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: use newly created topic when generating script'
           git push
-# trigger: topic-script-race
