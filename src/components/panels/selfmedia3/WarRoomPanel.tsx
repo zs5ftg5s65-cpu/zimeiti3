@@ -188,7 +188,7 @@ export default function WarRoomPanel({ store, currentDay, onNavigate }: Props) {
         involvesCustomer: Boolean(t.involvesCustomer), estimatedDuration: String(t.estimatedDuration || "45秒"), shootingDifficulty: (t.shootingDifficulty || "中等") as "简单" | "中等" | "较难",
         status: "待采用", createdAt: Date.now(),
       });
-      const script = store.createScriptFromTopic(topic.id, currentDay);
+      const script = store.createScriptFromTopic(topic, currentDay);
       store.updateHotCase(h.id, { generatedTopicId: topic.id, generatedScriptId: script?.id });
       store.setWarRoomTask(currentDay, "topic", true);
       if (script) store.setWarRoomTask(currentDay, "script", true);
