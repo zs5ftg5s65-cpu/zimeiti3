@@ -4,425 +4,52 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Film, Plus, Trash2, Copy, Check, ChevronDown, ChevronUp,
-  Wand2, Clock, Camera, Mic, Subtitles, Volume2, Scissors, Link2,
-} from "lucide-react";
+import { Film, Plus, Trash2, Copy, Check, ChevronDown, ChevronUp, Wand2, Download, RefreshCw, Camera, Mic, Subtitles, Scissors } from "lucide-react";
 import { toast } from "sonner";
 import type { SelfMediaStore } from "@/hooks/useSelfMediaStore";
 import type { Script, Shot, ContentType } from "@/data/selfmedia3-types";
-import { AIDisconnectedBanner, EmptyState, FactConfirmTag, CopyPromptButton } from "./shared";
-import { buildScriptPrompt, buildScriptRegeneratePrompt } from "./aiPrompts";
+import { AIDisconnectedBanner, EmptyState, FactConfirmTag } from "./shared";
+import { callAI, extractJSON } from "@/lib/aiService";
+import { loadAIConfig } from "@/lib/aiConfig";
 
 const CONTENT_TYPES: ContentType[] = ["老板娘口播", "菜品制作", "后厨实拍", "日常vlog", "食材科普", "门店展示", "故事讲述", "团购推荐", "图文笔记"];
-
-function emptyShot(n: number): Shot {
-  return {
-    shotNumber: n, time: "", shotSize: "中景", visual: "", action: "", dialogue: "",
-    subtitle: "", sound: "", shootingNote: "", editingNote: "", isRequired: true, status: "未拍",
-  };
-}
+const emptyShot = (n:number): Shot => ({ shotNumber:n,time:"",shotSize:"中景",visual:"",action:"",dialogue:"",subtitle:"",sound:"自然环境声 + 轻BGM",shootingNote:"不拍客人",editingNote:"",isRequired:true,status:"未拍" });
 
 interface Props { store: SelfMediaStore; currentDay?: number; }
+
 export default function ScriptDirectorPanel({ store, currentDay = 1 }: Props) {
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [showMeta, setShowMeta] = useState(true);
-  const [showMediaPicker, setShowMediaPicker] = useState(false);
+  const [activeId,setActiveId]=useState<string|null>(null);
+  const [showMeta,setShowMeta]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const filtered=store.scripts.filter(s=>s.accountId===store.currentAccount&&s.storeId===store.currentStore);
+  const dayScripts=filtered.filter(s=>s.day===currentDay).sort((a,b)=>b.createdAt-a.createdAt);
+  const dayTopic=store.topics.filter(t=>t.accountId===store.currentAccount&&t.storeId===store.currentStore&&t.day===currentDay).sort((a,b)=>b.createdAt-a.createdAt)[0]||null;
+  const active=filtered.find(s=>s.id===activeId)||dayScripts[0]||filtered[0]||null;
+  const sourceTopic=active?.sourceTopicId?store.topics.find(t=>t.id===active.sourceTopicId):dayTopic;
 
-  const filtered = store.scripts.filter(
-    (s) => s.accountId === store.currentAccount && s.storeId === store.currentStore,
-  );
-  const currentDayScripts = filtered.filter((s) => s.day === currentDay).sort((a, b) => b.createdAt - a.createdAt);
-  const currentDayTopic = store.topics
-    .filter((t) => t.accountId === store.currentAccount && t.storeId === store.currentStore && t.day === currentDay)
-    .sort((a, b) => b.createdAt - a.createdAt)[0] || null;
-  const active = filtered.find((s) => s.id === activeId) || currentDayScripts[0] || filtered[0] || null;
+  const update=(patch:Partial<Script>)=>{if(active)store.updateScript(active.id,{...patch,updatedAt:Date.now()});};
+  const newScript=()=>{const s=store.addScript({title:"新脚本",targetUser:"",goal:"",person:"老板娘",dish:"",estimatedDuration:"45秒",contentType:"老板娘口播",shots:[emptyShot(1),emptyShot(2),emptyShot(3)],requiredMediaIds:[],shootingOrder:"",requiredShots:"",optionalShots:"",missingMaterials:"",status:"草稿",createdAt:Date.now(),updatedAt:Date.now()});setActiveId(s.id);};
+  const makeToday=()=>{if(!dayTopic){toast.error("今天还没有选题");return;}const s=store.createScriptFromTopic(dayTopic,currentDay);if(s)setActiveId(s.id);};
+  const copy=()=>{if(!active)return;const s=store.addScript({...active,title:`${active.title}（副本）`,status:"草稿",createdAt:Date.now(),updatedAt:Date.now()} as Omit<Script,"id"|"accountId"|"storeId">);setActiveId(s.id);toast.success("脚本已复制");};
+  const remove=()=>{if(!active)return;if(confirm(`确定删除《${active.title}》吗？`)){store.removeScript(active.id);setActiveId(null);}};
+  const updateShot=(i:number,p:Partial<Shot>)=>{if(!active)return;const shots=active.shots.map((x,n)=>n===i?{...x,...p}:x);update({shots});};
 
-  // 来源选题
-  const sourceTopic = active?.sourceTopicId
-    ? store.topics.find((t) => t.id === active.sourceTopicId)
-    : null;
+  const download=()=>{if(!active)return;const text=[`《${active.title}》`,`目标用户：${active.targetUser}`,`目标：${active.goal}`,`人物：${active.person}`,`菜品：${active.dish||"—"}`,`时长：${active.estimatedDuration}`,`类型：${active.contentType}`,"","【逐镜头拍摄执行表】",...active.shots.map(x=>[`镜头${x.shotNumber}｜${x.time}｜${x.shotSize}｜${x.isRequired?"必拍":"可选"}`,`画面：${x.visual}`,`动作：${x.action}`,`台词：${x.dialogue}`,`字幕：${x.subtitle}`,`声音/BGM：${x.sound}`,`拍摄备注：${x.shootingNote}`,`剪辑备注：${x.editingNote}`,""].join("\n")),`拍摄顺序：${active.shootingOrder}`,`必拍：${active.requiredShots}`,`可选：${active.optionalShots}`,`缺失素材：${active.missingMaterials}`].join("\n");const blob=new Blob([text],{type:"text/plain;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`${active.title||"短视频脚本"}_完整拍摄执行表.txt`;a.click();URL.revokeObjectURL(url);toast.success("完整脚本已下载");};
 
-  // 已关联素材
-  const linkedMedia = active
-    ? store.media.filter((m) => active.requiredMediaIds.includes(m.id))
-    : [];
-  // 可关联素材（当前账号门店下未关联的）
-  const availableMedia = active
-    ? store.media.filter((m) => m.accountId === store.currentAccount && m.storeId === store.currentStore && !active.requiredMediaIds.includes(m.id))
-    : [];
+  const aiGenerate=async(action:string)=>{if(!active||busy)return;setBusy(true);try{const context=sourceTopic?`选题：${sourceTopic.title}\nHook：${sourceTopic.hook}\n痛点：${sourceTopic.painPoint}\n核心观点：${sourceTopic.coreOpinion}\n结构：${sourceTopic.structure}\nCTA：${sourceTopic.cta}\n推荐菜品：${sourceTopic.recommendedDish}`:"";const current=JSON.stringify({title:active.title,targetUser:active.targetUser,goal:active.goal,person:active.person,dish:active.dish,estimatedDuration:active.estimatedDuration,contentType:active.contentType,shots:active.shots});const prompt=`你是餐饮实体店短视频现场导演。请直接完成：${action}。\n${context}\n当前脚本：${current}\n\n必须输出严格JSON，不要Markdown。JSON必须包含 title,targetUser,goal,person,dish,estimatedDuration,contentType,shots,shootingOrder,requiredShots,optionalShots,missingMaterials。shots生成8-12个镜头，每个镜头包含shotNumber,time,shotSize,visual,action,dialogue,subtitle,sound,shootingNote,editingNote,isRequired,status。台词必须是老板娘可以直接照着说的完整口语，不得写“介绍一下/展示一下”这种空话。画面必须具体到手机怎么拍，台词必须和画面对应，前3秒必须有强Hook，时间轴必须与总时长匹配。不得拍客人，不得编造销量、评价、价格、经历；未知事实写【需要老板娘确认】。结尾必须有自然CTA。`;
+    const result=await callAI(prompt,loadAIConfig());const d=extractJSON<Record<string,unknown>>(result.content);const shots=Array.isArray(d.shots)?d.shots:[];if(shots.length<6)throw new Error("AI返回镜头不足，请再次生成");update({title:String(d.title||active.title),targetUser:String(d.targetUser||active.targetUser),goal:String(d.goal||active.goal),person:String(d.person||active.person),dish:String(d.dish||active.dish),estimatedDuration:String(d.estimatedDuration||active.estimatedDuration),contentType:(d.contentType||active.contentType) as ContentType,shots:shots.map((x,i)=>({...x as Shot,shotNumber:i+1,status:"未拍"})),shootingOrder:String(d.shootingOrder||""),requiredShots:String(d.requiredShots||""),optionalShots:String(d.optionalShots||""),missingMaterials:String(d.missingMaterials||""),status:"草稿"});toast.success("AI已直接生成并写入脚本");}catch(e){toast.error(e instanceof Error?e.message:"AI生成失败");}finally{setBusy(false);}};
 
-  const createScript = () => {
-    const s = store.addScript({
-      title: "新脚本", targetUser: "", goal: "", person: "老板娘", dish: "",
-      estimatedDuration: "45秒", contentType: "老板娘口播",
-      shots: [emptyShot(1), emptyShot(2), emptyShot(3)],
-      requiredMediaIds: [],
-      shootingOrder: "", requiredShots: "", optionalShots: "", missingMaterials: "",
-      status: "草稿", createdAt: Date.now(), updatedAt: Date.now(),
-    });
-    setActiveId(s.id);
-    toast.success("已创建新脚本");
-  };
-
-  const updateActive = (patch: Partial<Script>) => {
-    if (!active) return;
-    store.updateScript(active.id, { ...patch, updatedAt: Date.now() });
-  };
-
-  const copyScript = () => {
-    if (!active) return;
-    const copy = store.addScript({
-      ...active,
-      title: active.title + "（副本）",
-      status: "草稿",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    } as Omit<Script, "id" | "accountId" | "storeId">);
-    setActiveId(copy.id);
-    toast.success("脚本已复制");
-  };
-
-  const deleteScript = () => {
-    if (!active) return;
-    deleteScriptById(active.id);
-  };
-  const deleteScriptById = (id: string) => {
-    const target = filtered.find((s) => s.id === id);
-    if (!target) return;
-    const hasLinks = target.sourceTopicId || (target.requiredMediaIds?.length ?? 0) > 0;
-    const msg = hasLinks
-      ? `脚本"${target.title}"已关联选题/素材，删除脚本不会删除关联数据。确定删除吗？`
-      : `确定删除脚本"${target.title}"吗？此操作不可撤销。`;
-    if (window.confirm(msg)) {
-      store.removeScript(id);
-      if (activeId === id) {
-        const remaining = filtered.filter((s) => s.id !== id);
-        setActiveId(remaining[0]?.id || null);
-      }
-      toast.success("脚本已删除");
-    }
-  };
-
-  const updateShot = (idx: number, patch: Partial<Shot>) => {
-    if (!active) return;
-    const shots = [...active.shots];
-    shots[idx] = { ...shots[idx], ...patch };
-    updateActive({ shots });
-  };
-
-  const addShot = () => {
-    if (!active) return;
-    updateActive({ shots: [...active.shots, emptyShot(active.shots.length + 1)] });
-  };
-
-  const removeShot = (idx: number) => {
-    if (!active) return;
-    const shots = active.shots.filter((_, i) => i !== idx).map((s, i) => ({ ...s, shotNumber: i + 1 }));
-    updateActive({ shots });
-  };
-
-  const moveShot = (idx: number, dir: -1 | 1) => {
-    if (!active) return;
-    const shots = [...active.shots];
-    const target = idx + dir;
-    if (target < 0 || target >= shots.length) return;
-    [shots[idx], shots[target]] = [shots[target], shots[idx]];
-    shots.forEach((s, i) => (s.shotNumber = i + 1));
-    updateActive({ shots });
-  };
-
-  const copyText = (text: string, label: string) => {
-    if (!text) { toast.error("无内容可复制"); return; }
-    navigator.clipboard.writeText(text);
-    toast.success(`${label}已复制`);
-  };
-
-  const linkMedia = (mediaId: string) => {
-    if (!active) return;
-    updateActive({ requiredMediaIds: [...active.requiredMediaIds, mediaId] });
-    toast.success("素材已关联");
-  };
-
-  const unlinkMedia = (mediaId: string) => {
-    if (!active) return;
-    updateActive({ requiredMediaIds: active.requiredMediaIds.filter((id) => id !== mediaId) });
-  };
-
-  return (
-    <div className="space-y-4">
-      <AIDisconnectedBanner feature="AI脚本导演" />
-
-      <div className="flex items-center justify-between">
-        <div className="min-w-0">
-          <h3 className="text-sm font-medium flex items-center gap-1.5"><Film className="size-4" />脚本导演（{filtered.length}）</h3>
-          <p className="text-[10px] text-muted-foreground font-normal mt-0.5">当前 Day{currentDay}：{currentDayScripts.length} 条任务脚本 · 自由脚本不受 Day 限制</p>
-        </div>
-        <div className="flex gap-1.5 shrink-0">
-          {currentDayTopic && (
-            <Button size="sm" variant="outline" onClick={() => {
-              const script = store.createScriptFromTopic(currentDayTopic.id, currentDay);
-              if (script) setActiveId(script.id);
-              toast.success("今日完整脚本已生成/打开");
-            }}><Wand2 className="size-3.5 mr-1" />自动生成今日完整脚本</Button>
-          )}
-          <Button size="sm" onClick={createScript}><Plus className="size-3.5 mr-1" />新建自由脚本</Button>
-        </div>
-      </div>
-
-      {filtered.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 items-center">
-          {filtered.map((s) => (
-            <div key={s.id} className="flex items-center shrink-0">
-              <button
-                onClick={() => setActiveId(s.id)}
-                className={`shrink-0 px-3 py-1.5 rounded-l-md text-xs font-medium transition-colors ${
-                  active?.id === s.id ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {s.title.slice(0, 10)}{s.day === currentDay ? " · 今日" : s.day ? ` · D${s.day}` : " · 自由"}
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteScriptById(s.id);
-                }}
-                className={`shrink-0 px-2 py-1.5 rounded-r-md text-xs transition-colors border-l ${
-                  active?.id === s.id ? "bg-primary/80 text-primary-foreground hover:bg-destructive" : "bg-muted/50 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                }`}
-                title="删除脚本"
-              >
-                <Trash2 className="size-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {active && (
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={copyScript} className="flex-1 gap-1.5">
-            <Copy className="size-3.5" /> 复制脚本
-          </Button>
-          <Button size="sm" variant="outline" onClick={deleteScript} className="flex-1 gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/5">
-            <Trash2 className="size-3.5" /> 删除脚本
-          </Button>
-        </div>
-      )}
-
-      {!active ? (
-        <EmptyState title="暂无脚本" desc="点击新建脚本开始创建拍摄执行表" action={<Button size="sm" onClick={createScript}>新建脚本</Button>} />
-      ) : (
-        <>
-          {/* 来源选题 */}
-          {sourceTopic && (
-            <Card className="border-blue-200 bg-blue-50/40">
-              <CardContent className="p-3">
-                <p className="text-[10px] text-blue-600 font-medium">来源选题</p>
-                <p className="text-sm font-medium">{sourceTopic.title}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Hook：{sourceTopic.hook}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* 脚本元信息 */}
-          <Card>
-            <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowMeta(!showMeta)}>
-              <CardTitle className="text-sm flex items-center justify-between">
-                <span>脚本信息</span>
-                {showMeta ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-              </CardTitle>
-            </CardHeader>
-            {showMeta && (
-              <CardContent className="space-y-2 pt-0">
-                <Input value={active.title} onChange={(e) => updateActive({ title: e.target.value })} placeholder="视频标题" />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input value={active.targetUser} onChange={(e) => updateActive({ targetUser: e.target.value })} placeholder="目标用户" />
-                  <select value={active.contentType} onChange={(e) => updateActive({ contentType: e.target.value as ContentType })}
-                    className="h-9 px-2 rounded-md border border-input bg-background text-sm">
-                    {CONTENT_TYPES.map((c) => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <Input value={active.person} onChange={(e) => updateActive({ person: e.target.value })} placeholder="人物" />
-                  <Input value={active.dish} onChange={(e) => updateActive({ dish: e.target.value })} placeholder="菜品" />
-                  <Input value={active.estimatedDuration} onChange={(e) => updateActive({ estimatedDuration: e.target.value })} placeholder="时长" />
-                </div>
-                <Textarea value={active.goal} onChange={(e) => updateActive({ goal: e.target.value })} placeholder="本条视频目标" rows={2} />
-              </CardContent>
-            )}
-          </Card>
-
-          {/* AI操作 — 复制提示词到外部AI */}
-          <Card>
-            <CardContent className="p-3 space-y-2">
-              <p className="text-xs font-medium flex items-center gap-1"><Wand2 className="size-3.5" />外部AI工作流</p>
-              <p className="text-xs text-muted-foreground">复制提示词到外部AI生成后粘贴回来。下方按钮分别复制对应操作的提示词。</p>
-              <div className="flex flex-wrap gap-1.5">
-                <CopyPromptButton prompt={buildScriptPrompt(store, sourceTopic || undefined, currentDay)} label="生成完整脚本" />
-                <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "重新生成Hook")} label="重生成Hook" />
-                <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "重新生成结尾")} label="重生成结尾" />
-                <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "改为30秒版")} label="30秒版" />
-                <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "改为60秒版")} label="60秒版" />
-                <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "改为老板娘口语版")} label="口语版" />
-                <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "更真实、去掉AI腔")} label="更真实" />
-                <CopyPromptButton prompt={buildScriptRegeneratePrompt(store, active, "增加冲突和反差")} label="更有冲突" />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 已关联素材 */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center justify-between">
-                <span className="flex items-center gap-1"><Link2 className="size-4" />素材关联（{linkedMedia.length}）</span>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowMediaPicker(!showMediaPicker)}>
-                  {showMediaPicker ? "收起" : "关联素材"}
-                </Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {linkedMedia.length === 0 && <p className="text-xs text-muted-foreground">尚未关联素材，拍摄前请从素材库关联</p>}
-              {linkedMedia.map((m) => (
-                <div key={m.id} className="flex items-center justify-between gap-2 p-2 bg-muted/30 rounded">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium truncate">{m.name}</p>
-                    <p className="text-[10px] text-muted-foreground">{m.fileType} · {m.scene || "—"}</p>
-                  </div>
-                  <Button size="sm" variant="ghost" className="h-6 text-xs text-red-500" onClick={() => unlinkMedia(m.id)}>取消</Button>
-                </div>
-              ))}
-              {showMediaPicker && (
-                <div className="space-y-1.5 pt-2 border-t">
-                  {availableMedia.length === 0 ? (
-                    <p className="text-xs text-muted-foreground py-2">素材库中暂无可关联素材，先去素材库上传</p>
-                  ) : (
-                    availableMedia.slice(0, 10).map((m) => (
-                      <div key={m.id} className="flex items-center justify-between gap-2 p-2 border rounded">
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium truncate">{m.name}</p>
-                          <p className="text-[10px] text-muted-foreground">{m.fileType} · {m.scene || "—"}</p>
-                        </div>
-                        <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => linkMedia(m.id)}>关联</Button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* 逐镜头纵向卡片 */}
-          <div className="space-y-3">
-            {active.shots.map((shot, idx) => (
-              <Card key={idx} className={`border-l-4 ${shot.status === "已拍" ? "border-l-green-500 opacity-70" : "border-l-primary"}`}>
-                <CardContent className="p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Badge variant={shot.isRequired ? "default" : "secondary"} className="text-xs">镜头{shot.shotNumber}</Badge>
-                      <Badge variant="outline" className="text-[10px]">{shot.shotSize}</Badge>
-                      {shot.status === "已拍" && <Badge className="text-[10px] bg-green-100 text-green-700">已拍</Badge>}
-                    </div>
-                    <div className="flex items-center gap-0.5">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => moveShot(idx, -1)} disabled={idx === 0}><ChevronUp className="size-3.5" /></Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => moveShot(idx, 1)} disabled={idx === active.shots.length - 1}><ChevronDown className="size-3.5" /></Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={() => removeShot(idx)}><Trash2 className="size-3.5" /></Button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="flex items-center gap-1">
-                      <Clock className="size-3 text-muted-foreground" />
-                      <Input value={shot.time} onChange={(e) => updateShot(idx, { time: e.target.value })} placeholder="时间" className="h-8 text-xs" />
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Camera className="size-3 text-muted-foreground" />
-                      <Input value={shot.shotSize} onChange={(e) => updateShot(idx, { shotSize: e.target.value })} placeholder="景别" className="h-8 text-xs" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground flex items-center gap-1"><Camera className="size-2.5" />画面</label>
-                    <Textarea value={shot.visual} onChange={(e) => updateShot(idx, { visual: e.target.value })} placeholder="画面描述" rows={2} className="text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">人物动作</label>
-                    <Input value={shot.action} onChange={(e) => updateShot(idx, { action: e.target.value })} placeholder="动作" className="h-8 text-xs" />
-                  </div>
-                  <div className="bg-primary/[0.03] rounded-md p-2 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] text-muted-foreground flex items-center gap-1"><Mic className="size-2.5" />台词</label>
-                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => copyText(shot.dialogue, "台词")}><Copy className="size-3" /></Button>
-                    </div>
-                    <Textarea value={shot.dialogue} onChange={(e) => updateShot(idx, { dialogue: e.target.value })} placeholder="老板娘说的话" rows={2} className="text-xs bg-transparent border-0 p-0 focus-visible:ring-0" />
-                  </div>
-                  <div className="bg-muted/30 rounded-md p-2 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] text-muted-foreground flex items-center gap-1"><Subtitles className="size-2.5" />字幕</label>
-                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => copyText(shot.subtitle, "字幕")}><Copy className="size-3" /></Button>
-                    </div>
-                    <Input value={shot.subtitle} onChange={(e) => updateShot(idx, { subtitle: e.target.value })} placeholder="字幕文字" className="h-7 text-xs bg-transparent border-0 p-0 focus-visible:ring-0" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-muted-foreground flex items-center gap-1"><Volume2 className="size-2.5" />声音/BGM</label>
-                      <Input value={shot.sound} onChange={(e) => updateShot(idx, { sound: e.target.value })} className="h-8 text-xs" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-muted-foreground flex items-center gap-1"><Scissors className="size-2.5" />剪辑备注</label>
-                      <Input value={shot.editingNote} onChange={(e) => updateShot(idx, { editingNote: e.target.value })} className="h-8 text-xs" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">拍摄备注</label>
-                    <Input value={shot.shootingNote} onChange={(e) => updateShot(idx, { shootingNote: e.target.value })} className="h-8 text-xs" />
-                  </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <Button size="sm" variant={shot.status === "已拍" ? "default" : "outline"} className="h-7 text-xs flex-1"
-                      onClick={() => updateShot(idx, { status: shot.status === "已拍" ? "未拍" : "已拍" })}>
-                      {shot.status === "已拍" ? <><Check className="size-3 mr-1" />已拍</> : "标记已拍"}
-                    </Button>
-                    <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <input type="checkbox" checked={shot.isRequired} onChange={(e) => updateShot(idx, { isRequired: e.target.checked })} />
-                      必拍
-                    </label>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-          <Button variant="outline" className="w-full" onClick={addShot}><Plus className="size-3.5 mr-1" />添加镜头</Button>
-
-          {/* 拍摄总结 */}
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">拍摄总结</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              <div>
-                <label className="text-xs text-muted-foreground">拍摄顺序</label>
-                <Textarea value={active.shootingOrder} onChange={(e) => updateActive({ shootingOrder: e.target.value })} rows={2} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">必拍镜头</label>
-                <Textarea value={active.requiredShots} onChange={(e) => updateActive({ requiredShots: e.target.value })} rows={2} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">可选镜头</label>
-                <Textarea value={active.optionalShots} onChange={(e) => updateActive({ optionalShots: e.target.value })} rows={2} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">缺失素材</label>
-                <Textarea value={active.missingMaterials} onChange={(e) => updateActive({ missingMaterials: e.target.value })} rows={2} />
-              </div>
-              <FactConfirmTag text="如脚本中涉及具体时间、价格、经历，需老板娘确认后再拍摄" />
-            </CardContent>
-          </Card>
-
-          <div className="flex gap-1.5 flex-wrap">
-            {(["草稿", "已定稿", "拍摄中", "已拍摄", "已发布"] as const).map((st) => (
-              <Button key={st} size="sm" variant={active.status === st ? "default" : "outline"} className="text-xs h-8"
-                onClick={() => updateActive({ status: st })}>{st}</Button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
+  return <div className="space-y-4" data-sm3-page>
+    <AIDisconnectedBanner feature="AI脚本导演" />
+    <div className="flex items-center justify-between gap-2 flex-wrap"><div><h3 className="text-sm font-medium flex items-center gap-1.5"><Film className="size-4"/>脚本导演（{filtered.length}）</h3><p className="text-[10px] text-muted-foreground">Day{currentDay}：{dayScripts.length}条任务脚本</p></div><div className="flex gap-1.5 flex-wrap"><Button size="sm" variant="outline" onClick={makeToday} disabled={!dayTopic}><Wand2 className="size-3.5 mr-1"/>生成今日脚本</Button><Button size="sm" onClick={newScript}><Plus className="size-3.5 mr-1"/>新建脚本</Button></div></div>
+    {filtered.length>0&&<div className="flex gap-1.5 overflow-x-auto pb-1">{filtered.map(s=><button key={s.id} onClick={()=>setActiveId(s.id)} className={`shrink-0 px-3 py-1.5 rounded-md text-xs ${active?.id===s.id?"bg-primary text-primary-foreground":"bg-muted/50"}`}>{s.title.slice(0,12)}{s.day?` · D${s.day}`:" · 自由"}</button>)}</div>}
+    {!active?<EmptyState title="暂无脚本" desc="先生成今日脚本或新建自由脚本"/>:<>
+      <div className="flex gap-2 flex-wrap"><Button size="sm" variant="outline" onClick={copy}><Copy className="size-3.5 mr-1"/>复制脚本</Button><Button size="sm" variant="outline" onClick={download}><Download className="size-3.5 mr-1"/>下载完整脚本</Button><Button size="sm" variant="outline" onClick={()=>void aiGenerate("重新生成完整脚本") } disabled={busy}><RefreshCw className="size-3.5 mr-1"/>{busy?"AI生成中…":"不满意？重新生成"}</Button><Button size="sm" variant="outline" className="text-destructive" onClick={remove}><Trash2 className="size-3.5 mr-1"/>删除</Button></div>
+      {sourceTopic&&<Card className="border-blue-200 bg-blue-50/40"><CardContent className="p-3"><p className="text-[10px] text-blue-600">来源选题</p><p className="text-sm font-medium">{sourceTopic.title}</p><p className="text-xs text-muted-foreground mt-1">Hook：{sourceTopic.hook}</p></CardContent></Card>}
+      <Card><CardHeader className="pb-2 cursor-pointer" onClick={()=>setShowMeta(!showMeta)}><CardTitle className="text-sm flex justify-between">脚本信息{showMeta?<ChevronUp className="size-4"/>:<ChevronDown className="size-4"/>}</CardTitle></CardHeader>{showMeta&&<CardContent className="space-y-2"><Input value={active.title} onChange={e=>update({title:e.target.value})} placeholder="视频标题"/><div className="grid grid-cols-2 gap-2"><Input value={active.targetUser} onChange={e=>update({targetUser:e.target.value})} placeholder="目标用户"/><select value={active.contentType} onChange={e=>update({contentType:e.target.value as ContentType})} className="h-9 px-2 rounded-md border bg-background text-sm">{CONTENT_TYPES.map(x=><option key={x}>{x}</option>)}</select></div><div className="grid grid-cols-3 gap-2"><Input value={active.person} onChange={e=>update({person:e.target.value})} placeholder="人物"/><Input value={active.dish} onChange={e=>update({dish:e.target.value})} placeholder="菜品"/><Input value={active.estimatedDuration} onChange={e=>update({estimatedDuration:e.target.value})} placeholder="时长"/></div><Textarea value={active.goal} onChange={e=>update({goal:e.target.value})} rows={2} placeholder="视频目标"/></CardContent>}</Card>
+      <Card className="border-primary/20 bg-primary/[0.02]"><CardContent className="p-3 space-y-2"><p className="text-xs font-medium"><Wand2 className="size-3.5 inline mr-1"/>网页内AI导演</p><p className="text-xs text-muted-foreground">不用再复制提示词到外部AI。直接生成、直接覆盖当前脚本；不满意可以再次生成。</p><div className="flex flex-wrap gap-1.5"><Button size="sm" onClick={()=>void aiGenerate("重新生成完整脚本")} disabled={busy}>{busy?"生成中…":"AI重新生成完整脚本"}</Button><Button size="sm" variant="outline" onClick={()=>void aiGenerate("优化前3秒Hook并同步调整相关镜头")} disabled={busy}>优化Hook</Button><Button size="sm" variant="outline" onClick={()=>void aiGenerate("改成老板娘自然口语版")} disabled={busy}>老板娘口语版</Button><Button size="sm" variant="outline" onClick={()=>void aiGenerate("增加冲突和反差但不虚构事实")} disabled={busy}>增加冲突</Button><Button size="sm" variant="outline" onClick={()=>void aiGenerate("压缩成30秒版本")} disabled={busy}>30秒版</Button></div></CardContent></Card>
+      <div className="space-y-3">{active.shots.map((x,i)=><Card key={i} className="border-l-4 border-l-primary"><CardContent className="p-3 space-y-2"><div className="flex justify-between gap-2"><div className="flex gap-1.5 items-center"><Badge>镜头{x.shotNumber}</Badge><Badge variant="outline">{x.shotSize||"中景"}</Badge></div><label className="text-[10px] flex items-center gap-1"><input type="checkbox" checked={x.isRequired} onChange={e=>updateShot(i,{isRequired:e.target.checked})}/>必拍</label></div><div className="grid grid-cols-2 gap-2"><Input value={x.time} onChange={e=>updateShot(i,{time:e.target.value})} placeholder="时间"/><Input value={x.shotSize} onChange={e=>updateShot(i,{shotSize:e.target.value})} placeholder="景别"/></div><label className="text-[10px] text-muted-foreground flex items-center gap-1"><Camera className="size-3"/>画面</label><Textarea value={x.visual} onChange={e=>updateShot(i,{visual:e.target.value})} rows={2} placeholder="具体拍什么"/><Input value={x.action} onChange={e=>updateShot(i,{action:e.target.value})} placeholder="人物动作"/><div className="bg-primary/[0.03] p-2 rounded"><label className="text-[10px] text-muted-foreground flex items-center gap-1"><Mic className="size-3"/>台词</label><Textarea value={x.dialogue} onChange={e=>updateShot(i,{dialogue:e.target.value})} rows={3} placeholder="老板娘可以直接照着说的话"/></div><div className="bg-muted/30 p-2 rounded"><label className="text-[10px] text-muted-foreground flex items-center gap-1"><Subtitles className="size-3"/>字幕</label><Input value={x.subtitle} onChange={e=>updateShot(i,{subtitle:e.target.value})}/></div><div className="grid grid-cols-2 gap-2"><Input value={x.sound} onChange={e=>updateShot(i,{sound:e.target.value})} placeholder="声音/BGM"/><Input value={x.editingNote} onChange={e=>updateShot(i,{editingNote:e.target.value})} placeholder="剪辑备注"/></div><Input value={x.shootingNote} onChange={e=>updateShot(i,{shootingNote:e.target.value})} placeholder="拍摄备注"/><Button size="sm" variant={x.status==="已拍"?"default":"outline"} onClick={()=>updateShot(i,{status:x.status==="已拍"?"未拍":"已拍"})}>{x.status==="已拍"?<><Check className="size-3 mr-1"/>已拍</>:"标记已拍"}</Button></CardContent></Card>)}</div>
+      <Card><CardHeader className="pb-2"><CardTitle className="text-sm">拍摄总结</CardTitle></CardHeader><CardContent className="space-y-2"><Textarea value={active.shootingOrder} onChange={e=>update({shootingOrder:e.target.value})} placeholder="拍摄顺序" rows={2}/><Textarea value={active.requiredShots} onChange={e=>update({requiredShots:e.target.value})} placeholder="必拍镜头清单" rows={2}/><Textarea value={active.optionalShots} onChange={e=>update({optionalShots:e.target.value})} placeholder="可选镜头" rows={2}/><Textarea value={active.missingMaterials} onChange={e=>update({missingMaterials:e.target.value})} placeholder="缺失素材" rows={2}/><FactConfirmTag text="具体价格、时间、经历、销量等事实必须老板娘确认后再拍"/></CardContent></Card>
+    </>}
+  </div>;
 }
