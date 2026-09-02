@@ -97,7 +97,7 @@ export default function MediaLibraryPanel({ store }: Props) {
         const isImage = file.type.startsWith("image/"); const isVideo = file.type.startsWith("video/");
         if (!isImage && !isVideo) continue;
         const id = `media_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        const thumb = isImage ? await makeThumbnail(file) : "";
+        const thumb = isImage ? await makeThumbnail(file) : (isVideo ? ((await captureVideoFrames(file, 1)).frames[0]?.dataUrl || "") : "");
         const base = {
           id, name: file.name.replace(/\.[^.]+$/, ""), shootDate: new Date().toISOString().slice(0, 10), mediaType: "空镜" as MediaType,
           person: "", dish: "", scene: "", fileType: isImage ? "图片" as const : "视频" as const,

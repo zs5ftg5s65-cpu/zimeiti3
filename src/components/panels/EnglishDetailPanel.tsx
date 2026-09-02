@@ -202,7 +202,7 @@ function ReadingSection({ reading, day, hideCn }: { reading: any; day: number; h
                       {showResults && (
                         <div className="mt-2.5 pt-2 border-t border-border/40">
                           <p className="text-xs text-muted-foreground">
-                            <span className="font-medium text-foreground">解析：</span>
+                            <span className="font-medium text-foreground">参考答案：</span>{String.fromCharCode(65 + Number(correctOf(q)))} · <span className="font-medium text-foreground">解析：</span>
                             {q.explanation}
                           </p>
                         </div>
@@ -227,7 +227,7 @@ function ReadingSection({ reading, day, hideCn }: { reading: any; day: number; h
 function SpeakingSection({ speaking, day, hideCn }: { speaking: any; day: number; hideCn: boolean }) {
   const answers = MOCK_ENGLISH_ANSWERS[day];
   const { speak } = useSpeech();
-  const [showSamples, setShowSamples] = useState(false);
+  const [showSamples, setShowSamples] = useState(true);
   // 数据结构：dialogue:[{en,cn}]、topic、expressions:[{en,cn,usage}]、practiceTask
   const dialogue: { en: string; cn: string }[] = speaking?.dialogue || [];
   const expressions: { en: string; cn: string; usage?: string }[] = speaking?.expressions || [];
@@ -304,7 +304,7 @@ function SpeakingSection({ speaking, day, hideCn }: { speaking: any; day: number
             className="w-full justify-center gap-1.5"
           >
             <Lightbulb className="size-3.5" />
-            {showSamples ? '收起参考表达' : '查看更多参考表达'}
+            {showSamples ? '收起口语示范' : '显示口语示范'}
           </Button>
           <AnimatePresence>
             {showSamples && (

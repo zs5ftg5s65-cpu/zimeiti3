@@ -10,6 +10,7 @@ import type { SelfMediaStore } from "@/hooks/useSelfMediaStore";
 import { uid } from "@/hooks/useSelfMediaStore";
 import type { PublishRecord, PublishStatus, Platform, ContentType } from "@/data/selfmedia3-types";
 import { EmptyState } from "./shared";
+import { extractScreenshotJSON } from "@/lib/imageImportAI";
 
 const STATUSES: PublishStatus[] = ["待发布", "已发布", "已删除", "复用中"];
 const PLATFORMS: Platform[] = ["抖音", "视频号", "小红书"];
@@ -19,6 +20,7 @@ interface Props { store: SelfMediaStore; onNavigate?: (tab: string) => void; }
 export default function PublishPanel({ store, onNavigate }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<PublishRecord>>({});
+  const [ocrBusy, setOcrBusy] = useState(false);
 
   const filtered = store.publishes.filter(
     (p) => p.accountId === store.currentAccount && p.storeId === store.currentStore,
@@ -36,6 +38,16 @@ export default function PublishPanel({ store, onNavigate }: Props) {
   };
 
   const startEdit = (p: PublishRecord) => { setEditingId(p.id); setDraft({ ...p }); };
+
+  const importPublishScreenshot = async (file: File) => {
+    setOcrBusy(true);
+    try {
+      const d = await extractScreenshotJSON<Record<string, unknown>>(file, "抖音/视频号/小红书发布页面");
+      setDraft(prev => ({ ...prev, title:String(d.title || prev.title || ""), publishDate:String(d.publishDate || prev.publishDate || ""), publishTime:String(d.publishTime || prev.publishTime || ""), copywriting:String(d.copywriting || prev.copywriting || ""), cta:String(d.cta || prev.cta || ""), hashtags:Array.isArray(d.hashtags) ? d.hashtags.map(String) : prev.hashtags }));
+      if (!editingId) { const p=store.addPublish({videoId:uid("vid"),title:"",platform:"抖音",publishDate:new Date().toISOString().slice(0,10),publishTime:"18:00",videoType:"老板娘口播",duration:"",copywriting:"",hashtags:[],cta:"",status:"待发布",createdAt:Date.now()}); setEditingId(p.id); }
+      toast.success("截图已识别，保存前请核对");
+    } catch(e) { toast.error(e instanceof Error ? e.message : "截图识别失败"); } finally { setOcrBusy(false); }
+  };
 
   const save = () => {
     if (!editingId) return;
@@ -84,6 +96,7 @@ export default function PublishPanel({ store, onNavigate }: Props) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium flex items-center gap-1.5"><Send className="size-4" />发布管理（{filtered.length}）</h3>
+        <label className="text-xs border rounded-md px-2 py-1.5 cursor-pointer"><input type="file" accept="image/*" className="hidden" disabled={ocrBusy} onChange={(e) => { const f=e.target.files?.[0]; if(f) void importPublishScreenshot(f); e.currentTarget.value=""; }} />{ocrBusy ? "识别中…" : "📷 截图自动录入"}</label>
         <Button size="sm" onClick={startNew}><Plus className="size-3.5 mr-1" />新增发布</Button>
       </div>
 

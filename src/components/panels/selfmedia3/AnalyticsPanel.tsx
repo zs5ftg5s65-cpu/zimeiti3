@@ -11,6 +11,7 @@ import type { SelfMediaStore } from "@/hooks/useSelfMediaStore";
 import type { VideoAnalytics } from "@/data/selfmedia3-types";
 import { computeMetrics } from "@/data/selfmedia3-types";
 import { QuickNumberInput, EmptyState } from "./shared";
+import { extractScreenshotJSON } from "@/lib/imageImportAI";
 
 interface Props { store: SelfMediaStore; onNavigate?: (tab: string) => void; }
 
@@ -27,6 +28,7 @@ const pct = (v: number) => `${v.toFixed(2)}%`;
 export default function AnalyticsPanel({ store, onNavigate }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<VideoAnalytics>>({});
+  const [ocrBusy, setOcrBusy] = useState(false);
 
   const filtered = store.analytics.filter(
     (a) => a.accountId === store.currentAccount && a.storeId === store.currentStore,
@@ -39,6 +41,16 @@ export default function AnalyticsPanel({ store, onNavigate }: Props) {
   };
 
   const startEdit = (a: VideoAnalytics) => { setEditingId(a.id); setDraft({ ...a }); };
+
+  const importAnalyticsScreenshot = async (file: File) => {
+    setOcrBusy(true);
+    try {
+      const d = await extractScreenshotJSON<Record<string, unknown>>(file, "短视频平台数据详情页");
+      const n=(k:string)=>Number(d[k] ?? 0) || 0;
+      setDraft(prev=>({...prev,title:String(d.title||prev.title||""),views:n("views"),likes:n("likes"),comments:n("comments"),favorites:n("favorites"),shares:n("shares"),newFollowers:n("newFollowers"),privateMessages:n("privateMessages"),storeVisits:n("storeVisits"),groupPurchases:n("groupPurchases"),dropOff2s:n("dropOff2s"),retention5s:n("retention5s"),completionRate:n("completionRate"),adSpend:n("adSpend"),adViews:n("adViews"),adConversions:n("adConversions")}));
+      toast.success("数据截图已识别，保存前请核对");
+    } catch(e) { toast.error(e instanceof Error ? e.message : "截图识别失败"); } finally { setOcrBusy(false); }
+  };
 
   const save = () => {
     if (!editingId) return;
@@ -72,6 +84,7 @@ export default function AnalyticsPanel({ store, onNavigate }: Props) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium flex items-center gap-1.5"><BarChart3 className="size-4" />数据诊断（{filtered.length}）</h3>
+        <label className="text-xs border rounded-md px-2 py-1.5 cursor-pointer"><input type="file" accept="image/*" className="hidden" disabled={ocrBusy} onChange={(e)=>{const f=e.target.files?.[0];if(f){if(!editingId) startNew();setTimeout(()=>void importAnalyticsScreenshot(f),0)}e.currentTarget.value=""}} />{ocrBusy?"识别中…":"📷 截图自动录入"}</label>
         <Button size="sm" onClick={startNew}><Plus className="size-3.5 mr-1" />录入数据</Button>
       </div>
 

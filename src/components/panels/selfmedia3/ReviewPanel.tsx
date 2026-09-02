@@ -12,6 +12,9 @@ import type { SelfMediaStore } from "@/hooks/useSelfMediaStore";
 import type { Review } from "@/data/selfmedia3-types";
 import { AIDisconnectedBanner, EmptyState, CopyPromptButton } from "./shared";
 import { buildReviewPrompt } from "./aiPrompts";
+import { fileToDataUrl } from "@/lib/imageImportAI";
+import { callAI, extractJSON } from "@/lib/aiService";
+import { loadAIConfig } from "@/lib/aiConfig";
 
 interface Props { store: SelfMediaStore; }
 
@@ -24,6 +27,7 @@ const EMPTY: Omit<Review, "id" | "accountId" | "storeId" | "createdAt" | "isManu
 export default function ReviewPanel({ store }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<Review>>({});
+  const [aiBusy, setAiBusy] = useState(false);
 
   const filtered = store.reviews.filter(
     (r) => r.accountId === store.currentAccount && r.storeId === store.currentStore,
@@ -36,6 +40,20 @@ export default function ReviewPanel({ store }: Props) {
   };
 
   const startEdit = (r: Review) => { setEditingId(r.id); setDraft({ ...r }); };
+
+  const aiReviewFromScreenshot = async (file: File) => {
+    setAiBusy(true);
+    try {
+      const image=await fileToDataUrl(file);
+      const result=await callAI("请读取这张短视频数据截图，并基于截图真实可见数据直接生成AI复盘。只输出严格JSON，字段：openingProblem,retentionProblem,topicProblem,contentProblem,personProblem,conversionProblem,biggestProblem,evidence,mustChange,keepUnchanged,isHighPerforming。看不到的信息不要猜。",loadAIConfig(),[image]);
+      const d=extractJSON<Record<string,unknown>>(result.content);
+      const existing=store.reviews.find(r=>r.id===editingId);
+      const target=existing || store.addReview({...EMPTY,createdAt:Date.now(),isManual:false});
+      if(!existing) setEditingId(target.id);
+      const patch=Object.fromEntries(Object.keys(EMPTY).map(k=>[k,k==='isHighPerforming'?Boolean(d[k]):String(d[k]??"")])) as Partial<Review>;
+      patch.isManual=false; store.updateReview(target.id,patch); setDraft({...target,...patch}); toast.success("截图已识别并完成AI复盘");
+    } catch(e) { toast.error(e instanceof Error?e.message:"AI复盘失败"); } finally { setAiBusy(false); }
+  };
 
   const save = () => {
     if (!editingId) return;
@@ -93,6 +111,7 @@ export default function ReviewPanel({ store }: Props) {
 
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium flex items-center gap-1.5"><Target className="size-4" />AI复盘（{filtered.length}）</h3>
+        <label className="text-xs border rounded-md px-2 py-1.5 cursor-pointer"><input type="file" accept="image/*" className="hidden" disabled={aiBusy} onChange={(e)=>{const f=e.target.files?.[0];if(f)void aiReviewFromScreenshot(f);e.currentTarget.value=""}} />{aiBusy?"AI分析中…":"📷 上传截图自动复盘"}</label>
         <Button size="sm" onClick={startNew}><Plus className="size-3.5 mr-1" />手动复盘</Button>
       </div>
 
