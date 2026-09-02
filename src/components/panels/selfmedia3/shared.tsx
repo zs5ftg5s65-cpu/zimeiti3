@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,15 +8,58 @@ import type { SelfMediaStore } from "@/hooks/useSelfMediaStore";
 import type { ExportData, ImportPreview } from "@/hooks/useSelfMediaStore";
 import { accountName, storeName } from "@/data/selfmedia3-types";
 
-// AI能力未连接提示条
+// AI能力状态提示条：只检查服务端是否配置密钥，不调用模型，不产生费用。
 export function AIDisconnectedBanner({ feature }: { feature: string }) {
+  const [status, setStatus] = useState<"checking" | "connected" | "disconnected">("checking");
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/ai", { method: "GET", cache: "no-store" })
+      .then(async (response) => {
+        if (!active) return;
+        if (!response.ok) { setStatus("disconnected"); return; }
+        const data = await response.json().catch(() => ({}));
+        setStatus(data?.configured ? "connected" : "disconnected");
+      })
+      .catch(() => { if (active) setStatus("disconnected"); });
+    return () => { active = false; };
+  }, []);
+
+  if (status === "connected") {
+    return (
+      <Card className="border-emerald-200 bg-emerald-50/60">
+        <CardContent className="p-3 flex items-start gap-2">
+          <ZapOff className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-emerald-800 space-y-0.5">
+            <p className="font-medium">AI能力已连接 — {feature}</p>
+            <p>DeepSeek接口已配置，可以直接使用AI生成；不会在前端保存API Key。</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (status === "checking") {
+    return (
+      <Card className="border-slate-200 bg-slate-50/60">
+        <CardContent className="p-3 flex items-start gap-2">
+          <ZapOff className="size-4 text-slate-500 shrink-0 mt-0.5" />
+          <div className="text-xs text-slate-700 space-y-0.5">
+            <p className="font-medium">正在检查AI连接 — {feature}</p>
+            <p>正在检查部署环境配置，不会调用模型。</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="border-amber-200 bg-amber-50/60">
       <CardContent className="p-3 flex items-start gap-2">
         <ZapOff className="size-4 text-amber-600 shrink-0 mt-0.5" />
         <div className="text-xs text-amber-800 space-y-0.5">
           <p className="font-medium">AI能力未连接 — {feature}</p>
-          <p>当前未接入AI接口。你可以手动填写内容、保存，或复制到外部AI工具生成后粘贴回来。</p>
+          <p>当前部署环境未检测到AI密钥。请在Vercel环境变量配置后重新部署。</p>
         </div>
       </CardContent>
     </Card>
