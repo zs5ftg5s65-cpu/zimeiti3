@@ -1,0 +1,187 @@
+name: Final UX AI Patch
+on:
+  push:
+    branches: [main]
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, 'final ux ai patch')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply integrated fixes
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def edit(path, fn):
+              p=Path(path); s=p.read_text(encoding='utf-8'); n=fn(s); p.write_text(n,encoding='utf-8'); print(path, len(s), '->', len(n))
+
+          # 1) Global mobile layout hardening.
+          def css(s):
+              if '/* SM3 mobile hardening */' in s: return s
+              return s + r'''
+
+/* SM3 mobile hardening */
+html, body, #root { width: 100%; max-width: 100%; overflow-x: hidden; }
+button, input, textarea, select { max-width: 100%; }
+img, video { max-width: 100%; }
+@media (max-width: 640px) {
+  .sm3-page, [data-sm3-page] { width: 100%; min-width: 0; }
+  .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+  .grid.grid-cols-3 { grid-template-columns: 1fr; }
+  .grid.grid-cols-4 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .grid.grid-cols-2 { grid-template-columns: minmax(0,1fr); }
+  .fixed.inset-0 > * { max-width: calc(100vw - 24px) !important; }
+  table { min-width: 0 !important; }
+}
+'''
+          edit('src/index.css', css)
+
+          # 2) Script Director: direct AI generation + regeneration + full export.
+          def script(s):
+              s=s.replace('import { AIDisconnectedBanner, EmptyState, FactConfirmTag, CopyPromptButton } from "./shared";', 'import { AIDisconnectedBanner, EmptyState, FactConfirmTag, CopyPromptButton } from "./shared";\nimport { callAI, extractJSON } from "@/lib/aiService";\nimport { loadAIConfig } from "@/lib/aiConfig";')
+              s=s.replace('const [showMediaPicker, setShowMediaPicker] = useState(false);', 'const [showMediaPicker, setShowMediaPicker] = useState(false);\n  const [aiBusy, setAiBusy] = useState(false);')
+              marker='  const linkMedia = (mediaId: string) => {'
+              insert=r'''  const downloadFullScript = () => {
+    if (!active) return;
+    const lines = [
+      `《${active.title}》`, `目标用户：${active.targetUser}`, `目标：${active.goal}`,
+      `人物：${active.person}`, `菜品：${active.dish || "—"}`, `时长：${active.estimatedDuration}`, `类型：${active.contentType}`, "",
+      "【逐镜头拍摄执行表】",
+      ...active.shots.map((x) => [
+        `镜头${x.shotNumber}｜${x.time}｜${x.shotSize}${x.isRequired ? "｜必拍" : "｜可选"}`,
+        `画面：${x.visual}`, `动作：${x.action}`, `台词：${x.dialogue}`, `字幕：${x.subtitle}`,
+        `声音/BGM：${x.sound}`, `拍摄备注：${x.shootingNote}`, `剪辑备注：${x.editingNote}`, "",
+      ].join("\n")),
+      `拍摄顺序：${active.shootingOrder}`, `必拍镜头：${active.requiredShots}`, `可选镜头：${active.optionalShots}`, `缺失素材：${active.missingMaterials}`,
+    ].join("\n");
+    const blob = new Blob([lines], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a");
+    a.href=url; a.download=`${active.title || "短视频脚本"}_拍摄执行表.txt`; a.click(); URL.revokeObjectURL(url);
+    toast.success("完整脚本已下载");
+  };
+
+  const runScriptAI = async (action: string) => {
+    if (!active || aiBusy) return;
+    setAiBusy(true);
+    try {
+      const base = JSON.stringify({ title: active.title, targetUser: active.targetUser, goal: active.goal, person: active.person, dish: active.dish, estimatedDuration: active.estimatedDuration, contentType: active.contentType, shots: active.shots, shootingOrder: active.shootingOrder, requiredShots: active.requiredShots, optionalShots: active.optionalShots, missingMaterials: active.missingMaterials });
+      const topicText = sourceTopic ? `来源选题：${sourceTopic.title}\nHook：${sourceTopic.hook}\n结构：${sourceTopic.structure}\nCTA：${sourceTopic.cta}\n核心观点：${sourceTopic.coreOpinion}` : "";
+      const prompt = `你是餐饮短视频现场导演。请直接在网页内完成“${action}”，不要让我复制到外部AI。\n\n${topicText}\n当前脚本JSON：${base}\n\n硬性要求：\n1. 输出严格JSON，不要Markdown。\n2. 必须是可以直接拿手机拍摄的完整执行脚本。\n3. 生成8-12个镜头，每个镜头必须有：shotNumber,time,shotSize,visual,action,dialogue,subtitle,sound,shootingNote,editingNote,isRequired,status。\n4. 台词必须具体到老板娘可以照着说，口语化、自然、有信息量，不能写“介绍一下”“展示一下”这种空话。\n5. 前3秒必须有明确钩子；每个镜头时间要与总时长匹配；画面和台词必须一一对应。\n6. 不拍客人、不编造销量/评价/价格/经历；未经确认的事实标记【需要老板娘确认】。\n7. 结尾必须有自然CTA。\n8. 同时返回title,targetUser,goal,person,dish,estimatedDuration,contentType,shots,shootingOrder,requiredShots,optionalShots,missingMaterials。`;
+      const result = await callAI(prompt, loadAIConfig());
+      const data = extractJSON<Record<string, unknown>>(result.content);
+      const shots = Array.isArray(data.shots) ? data.shots : [];
+      if (shots.length < 6) throw new Error("AI返回的完整镜头不足，请重试");
+      updateActive({
+        title: String(data.title || active.title), targetUser: String(data.targetUser || active.targetUser), goal: String(data.goal || active.goal),
+        person: String(data.person || active.person), dish: String(data.dish || active.dish), estimatedDuration: String(data.estimatedDuration || active.estimatedDuration),
+        contentType: (data.contentType || active.contentType) as ContentType,
+        shots: shots.map((x, i) => ({ ...(x as Shot), shotNumber: i + 1, status: "未拍" })),
+        shootingOrder: String(data.shootingOrder || active.shootingOrder), requiredShots: String(data.requiredShots || active.requiredShots),
+        optionalShots: String(data.optionalShots || active.optionalShots), missingMaterials: String(data.missingMaterials || active.missingMaterials),
+        status: "草稿",
+      });
+      toast.success(`${action}完成，已直接写入脚本`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "AI生成失败"); }
+    finally { setAiBusy(false); }
+  };
+
+'''
+              if marker in s and 'const runScriptAI = async' not in s: s=s.replace(marker,insert+marker)
+              old=re.search(r'          /\* AI操作 — 复制提示词到外部AI \*/.*?          </Card>\n', s, re.S)
+              if old:
+                  new='''          {/* 网页内AI导演 */}\n          <Card className="border-primary/20 bg-primary/[0.02]">\n            <CardContent className="p-3 space-y-2">\n              <p className="text-xs font-medium flex items-center gap-1"><Wand2 className="size-3.5" />AI脚本导演（网页内直接生成）</p>\n              <p className="text-xs text-muted-foreground">不需要复制提示词到外部AI。AI会直接生成并写入当前脚本；不满意可直接重新生成。</p>\n              <div className="flex flex-wrap gap-1.5">\n                <Button size="sm" className="h-8 text-xs" disabled={aiBusy} onClick={() => void runScriptAI("重新生成完整脚本")}>{aiBusy ? "AI生成中…" : "AI重新生成完整脚本"}</Button>\n                <Button size="sm" variant="outline" className="h-8 text-xs" disabled={aiBusy} onClick={() => void runScriptAI("只优化前3秒Hook，同时重做与Hook匹配的镜头")}>重新优化Hook</Button>\n                <Button size="sm" variant="outline" className="h-8 text-xs" disabled={aiBusy} onClick={() => void runScriptAI("改成老板娘自然口语版")}>老板娘口语版</Button>\n                <Button size="sm" variant="outline" className="h-8 text-xs" disabled={aiBusy} onClick={() => void runScriptAI("增加冲突和反差，但不虚构事实")}>增加冲突</Button>\n                <Button size="sm" variant="outline" className="h-8 text-xs" disabled={aiBusy} onClick={() => void runScriptAI("压缩成30秒可执行版")}>30秒版</Button>\n                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={downloadFullScript}><Download className="size-3 mr-1" />下载完整脚本</Button>\n              </div>\n            </CardContent>\n          </Card>\n'''
+                  # Download icon import
+                  s=s.replace('Film, Plus, Trash2, Copy, Check, ChevronDown, ChevronUp,', 'Film, Plus, Trash2, Copy, Check, ChevronDown, ChevronUp, Download,')
+                  s=s[:old.start()]+new+s[old.end():]
+              return s
+          edit('src/components/panels/selfmedia3/ScriptDirectorPanel.tsx', script)
+
+          # 3) Video cards: generate and persist a first-frame thumbnail for uploaded videos.
+          def media(s):
+              old='const thumb = isImage ? await makeThumbnail(file) : "";'
+              new='const thumb = isImage ? await makeThumbnail(file) : (isVideo ? ((await captureVideoFrames(file, 1)).frames[0]?.dataUrl || "") : "");'
+              return s.replace(old,new)
+          edit('src/components/panels/selfmedia3/MediaLibraryPanel.tsx', media)
+
+          # 4) English: make speaking demonstration visible by default; reading answers already use correctIndex with answerIndex fallback.
+          def eng(s):
+              s=s.replace('const [showSamples, setShowSamples] = useState(false);','const [showSamples, setShowSamples] = useState(true);')
+              s=s.replace("{showSamples ? '收起参考表达' : '查看更多参考表达'}","{showSamples ? '收起口语示范' : '显示口语示范'}")
+              s=s.replace('<p className="text-xs text-muted-foreground">\n                            <span className="font-medium text-foreground">解析：</span>', '<p className="text-xs text-muted-foreground">\n                            <span className="font-medium text-foreground">参考答案：</span>{String.fromCharCode(65 + Number(correctOf(q)))} · <span className="font-medium text-foreground">解析：</span>')
+              return s
+          edit('src/components/panels/EnglishDetailPanel.tsx', eng)
+
+          # 5) Add a reusable image-to-JSON helper for screenshots.
+          Path('src/lib/imageImportAI.ts').write_text(r'''import { callAI, extractJSON } from "./aiService";
+import { loadAIConfig } from "./aiConfig";
+
+export async function fileToDataUrl(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const r = new FileReader(); r.onload = () => resolve(String(r.result || "")); r.onerror = () => reject(new Error("图片读取失败")); r.readAsDataURL(file);
+  });
+}
+
+export async function extractScreenshotJSON<T>(file: File, instruction: string): Promise<T> {
+  const image = await fileToDataUrl(file);
+  const prompt = `你是数据录入助手。用户上传的是${instruction}的手机截图。请只识别截图中真实可见的信息，不确定就返回空字符串或0，禁止猜测。输出严格JSON，不要Markdown。`;
+  const result = await callAI(prompt, loadAIConfig(), [image]);
+  return extractJSON<T>(result.content);
+}
+''', encoding='utf-8')
+
+          # 6) Publish/Analytics/Review: add screenshot import UI. This is additive and does not alter storage keys/schema.
+          def publish(s):
+              s=s.replace('import { EmptyState } from "./shared";', 'import { EmptyState } from "./shared";\nimport { extractScreenshotJSON } from "@/lib/imageImportAI";')
+              s=s.replace('const [draft, setDraft] = useState<Partial<PublishRecord>>({});','const [draft, setDraft] = useState<Partial<PublishRecord>>({});\n  const [ocrBusy, setOcrBusy] = useState(false);')
+              anchor='  const startEdit = (p: PublishRecord) => { setEditingId(p.id); setDraft({ ...p }); };'
+              add='''\n  const importPublishScreenshot = async (file: File) => {\n    setOcrBusy(true);\n    try {\n      const d = await extractScreenshotJSON<Record<string, unknown>>(file, "抖音/视频号/小红书发布页面");\n      setDraft((prev) => ({ ...prev, title: String(d.title || prev.title || ""), publishDate: String(d.publishDate || prev.publishDate || ""), publishTime: String(d.publishTime || prev.publishTime || ""), copywriting: String(d.copywriting || prev.copywriting || ""), cta: String(d.cta || prev.cta || ""), hashtags: Array.isArray(d.hashtags) ? d.hashtags.map(String) : prev.hashtags }));\n      toast.success("截图已识别，字段已自动填入，保存前请核对");\n    } catch (e) { toast.error(e instanceof Error ? e.message : "截图识别失败"); } finally { setOcrBusy(false); }\n  };\n'''
+              if anchor in s and 'importPublishScreenshot' not in s: s=s.replace(anchor,anchor+add)
+              target='<div className="flex items-center justify-between">\n        <h3 className="text-sm font-medium flex items-center gap-1.5"><Send className="size-4" />发布管理（{filtered.length}）</h3>'
+              repl=target+'\n        <label className="text-xs border rounded-md px-2 py-1.5 cursor-pointer"><input type="file" accept="image/*" className="hidden" disabled={ocrBusy} onChange={(e) => { const f=e.target.files?.[0]; if(f) void importPublishScreenshot(f); e.currentTarget.value=""; }} />{ocrBusy ? "识别中…" : "📷 截图自动录入"}</label>'
+              return s.replace(target,repl)
+          edit('src/components/panels/selfmedia3/PublishPanel.tsx', publish)
+
+          def analytics(s):
+              s=s.replace('import { QuickNumberInput, EmptyState } from "./shared";', 'import { QuickNumberInput, EmptyState } from "./shared";\nimport { extractScreenshotJSON } from "@/lib/imageImportAI";')
+              s=s.replace('const [draft, setDraft] = useState<Partial<VideoAnalytics>>({});','const [draft, setDraft] = useState<Partial<VideoAnalytics>>({});\n  const [ocrBusy, setOcrBusy] = useState(false);')
+              anchor='  const startEdit = (a: VideoAnalytics) => { setEditingId(a.id); setDraft({ ...a }); };'
+              add='''\n  const importAnalyticsScreenshot = async (file: File) => {\n    setOcrBusy(true);\n    try {\n      const d = await extractScreenshotJSON<Record<string, unknown>>(file, "短视频平台数据详情页");\n      const num=(k:string)=>Number(d[k] ?? 0) || 0;\n      setDraft((prev) => ({ ...prev, title:String(d.title||prev.title||""), views:num("views"), likes:num("likes"), comments:num("comments"), favorites:num("favorites"), shares:num("shares"), newFollowers:num("newFollowers"), privateMessages:num("privateMessages"), storeVisits:num("storeVisits"), groupPurchases:num("groupPurchases"), dropOff2s:num("dropOff2s"), retention5s:num("retention5s"), completionRate:num("completionRate"), adSpend:num("adSpend"), adViews:num("adViews"), adConversions:num("adConversions") }));\n      setEditingId((id) => id); toast.success("数据截图已识别，保存前请核对");\n    } catch (e) { toast.error(e instanceof Error ? e.message : "截图识别失败"); } finally { setOcrBusy(false); }\n  };\n'''
+              if anchor in s and 'importAnalyticsScreenshot' not in s: s=s.replace(anchor,anchor+add)
+              target='<div className="flex items-center justify-between">\n        <h3 className="text-sm font-medium flex items-center gap-1.5"><BarChart3 className="size-4" />数据诊断（{filtered.length}）</h3>'
+              repl=target+'\n        <label className="text-xs border rounded-md px-2 py-1.5 cursor-pointer"><input type="file" accept="image/*" className="hidden" disabled={ocrBusy} onChange={(e) => { const f=e.target.files?.[0]; if(f) { if(!editingId) startNew(); setTimeout(()=>void importAnalyticsScreenshot(f),0); } e.currentTarget.value=""; }} />{ocrBusy ? "识别中…" : "📷 截图自动录入"}</label>'
+              return s.replace(target,repl)
+          edit('src/components/panels/selfmedia3/AnalyticsPanel.tsx', analytics)
+
+          def review(s):
+              s=s.replace('import { buildReviewPrompt } from "./aiPrompts";','import { buildReviewPrompt } from "./aiPrompts";\nimport { extractScreenshotJSON } from "@/lib/imageImportAI";\nimport { callAI, extractJSON } from "@/lib/aiService";\nimport { loadAIConfig } from "@/lib/aiConfig";')
+              s=s.replace('const [draft, setDraft] = useState<Partial<Review>>({});','const [draft, setDraft] = useState<Partial<Review>>({});\n  const [aiBusy, setAiBusy] = useState(false);')
+              anchor='  const startEdit = (r: Review) => { setEditingId(r.id); setDraft({ ...r }); };'
+              add='''\n  const aiReviewFromScreenshot = async (file: File) => {\n    setAiBusy(true);\n    try {\n      const image = await (await import("@/lib/imageImportAI")).fileToDataUrl(file);\n      const result = await callAI("请读取这张短视频数据截图，先识别所有可见数据，再基于真实数据生成AI复盘。只输出严格JSON，字段：openingProblem,retentionProblem,topicProblem,contentProblem,personProblem,conversionProblem,biggestProblem,evidence,mustChange,keepUnchanged。不能猜测截图看不到的信息。", loadAIConfig(), [image]);\n      const d=extractJSON<Record<string,unknown>>(result.content);\n      const current=store.reviews.find(r=>r.id===editingId);\n      const target=current || store.addReview({ ...EMPTY, createdAt:Date.now(), isManual:false });\n      if(!current) setEditingId(target.id);\n      const patch=Object.fromEntries(Object.keys(EMPTY).map(k=>[k, d[k] == null ? "" : String(d[k])])) as Partial<Review>;\n      patch.isManual=false; store.updateReview(target.id, patch); setDraft({ ...target, ...patch });\n      toast.success("截图已识别并完成AI复盘");\n    } catch(e) { toast.error(e instanceof Error ? e.message : "AI复盘失败"); } finally { setAiBusy(false); }\n  };\n'''
+              if anchor in s and 'aiReviewFromScreenshot' not in s: s=s.replace(anchor,anchor+add)
+              target='<div className="flex items-center justify-between">\n        <h3 className="text-sm font-medium flex items-center gap-1.5"><Target className="size-4" />AI复盘（{filtered.length}）</h3>'
+              repl=target+'\n        <label className="text-xs border rounded-md px-2 py-1.5 cursor-pointer"><input type="file" accept="image/*" className="hidden" disabled={aiBusy} onChange={(e) => { const f=e.target.files?.[0]; if(f) void aiReviewFromScreenshot(f); e.currentTarget.value=""; }} />{aiBusy ? "AI分析中…" : "📷 上传截图自动复盘"}</label>'
+              return s.replace(target,repl)
+          edit('src/components/panels/selfmedia3/ReviewPanel.tsx', review)
+
+          # 7) One-time workflow cleanup happens after the functional commit is pushed.
+          import subprocess
+          subprocess.run(['git','config','user.name','github-actions[bot]'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','add','.'],check=True)
+          subprocess.run(['git','commit','-m','fix: final ux ai patch'],check=False)
+          subprocess.run(['git','push'],check=True)
+
+      - name: Remove one-time workflow
+        if: success()
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          rm -f .github/workflows/final-ux-ai-patch.yml
+          git add .github/workflows/final-ux-ai-patch.yml
+          git commit -m "chore: remove one-time final ux ai patch workflow" || true
+          git push || true
