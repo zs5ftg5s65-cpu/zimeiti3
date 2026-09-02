@@ -123,13 +123,11 @@ export function useSelfMediaStore() {
   const [topics, setTopics] = useState<Topic[]>(() => load(KEYS.topics, []));
   const [characters, setCharacters] = useState<Character[]>(() => {
     const existing = load<Character[]>(KEYS.characters, []);
-    // 迁移：给旧数据补 scopeType
     const migrated = existing.map((c) => ({
       ...c,
       scopeType: (c.scopeType || (c.accountId === "bosslady" && c.storeId === "common" ? "shared" : "account")) as ScopeType,
     }));
     if (migrated.length === 0) return [DEFAULT_CHARACTER];
-    // 确保默认shared老板娘存在
     if (!migrated.some((c) => c.id === "char_bosslady_default")) {
       return [DEFAULT_CHARACTER, ...migrated];
     }
@@ -181,7 +179,6 @@ export function useSelfMediaStore() {
   }, []);
   const setCurrentStore = useCallback((s: StoreId) => setCurrentStoreState(s), []);
 
-  // ============ scope 安全的 CRUD ============
   const addScoped = useCallback(<T extends { id: string; accountId: AccountId; storeId: StoreId }>(
     setter: React.Dispatch<React.SetStateAction<T[]>>,
     item: Omit<T, "id" | "accountId" | "storeId"> & { id?: string },
@@ -230,12 +227,18 @@ export function useSelfMediaStore() {
   }, [currentAccount, currentStore]);
 
   // ============ 今日选题 → 完整脚本（统一闭环入口） ============
-  const createScriptFromTopic = useCallback((topicId: string, dayOverride?: number): Script | null => {
-    const topic = topics.find((t) =>
-      t.id === topicId &&
-      t.accountId === currentAccount &&
-      t.storeId === currentStore
-    );
+  // 支持直接传入刚刚 addTopic 返回的新Topic。
+  // React state setter 是异步的：如果在同一次事件中先 addTopic() 再 createScriptFromTopic(id)，
+  // 闭包里的 topics 仍可能是旧数组，从而误报“未找到当前账号/门店下的选题”。
+  // 传入 Topic 对象可以绕过这个时序问题，同时保持原有按id调用方式完全兼容。
+  const createScriptFromTopic = useCallback((topicOrId: string | Topic, dayOverride?: number): Script | null => {
+    const topic = typeof topicOrId === "string"
+      ? topics.find((t) =>
+          t.id === topicOrId &&
+          t.accountId === currentAccount &&
+          t.storeId === currentStore
+        )
+      : (topicOrId.accountId === currentAccount && topicOrId.storeId === currentStore ? topicOrId : null);
     if (!topic) {
       toast.error("未找到当前账号/门店下的选题");
       return null;
@@ -264,7 +267,6 @@ export function useSelfMediaStore() {
   }, [topics, scripts, currentAccount, currentStore, addScoped, updateScoped]);
 
   // ============ 人物库特殊处理（支持 shared） ============
-  // 获取当前scope可见的人物：当前scope私有 + shared
   const getVisibleCharacters = useCallback((): Character[] => {
     return characters.filter((c) => isCharacterVisible(c, currentAccount, currentStore));
   }, [characters, currentAccount, currentStore]);
@@ -287,7 +289,6 @@ export function useSelfMediaStore() {
   const updateCharacter = useCallback((id: string, patch: Partial<Character>) => {
     setCharacters((prev) => prev.map((c) => {
       if (c.id !== id) return c;
-      // shared 人物仅老板娘个人IP账号可编辑；私有人物只有owner可编辑
       if (c.scopeType === "shared") {
         if (currentAccount !== "bosslady") {
           toast.error("公共人物资料仅老板娘账号可编辑");
@@ -297,7 +298,6 @@ export function useSelfMediaStore() {
         toast.error("无权修改其他账号/门店的人物资料");
         return c;
       }
-      // 创建后 scopeType/accountId/storeId 锁定，禁止通过普通编辑修改
       const { scopeType: _st, accountId: _ai, storeId: _si, ...contentPatch } = patch;
       return { ...c, ...contentPatch, updatedAt: Date.now() };
     }));
@@ -393,7 +393,6 @@ export function useSelfMediaStore() {
     if (!imported || !imported.data || typeof imported.data !== "object") {
       return { ...empty, message: "文件格式无效：缺少data字段" };
     }
-    // 严格版本校验：只接受 3.0
     if (imported.version !== "3.0") {
       return { ...empty, version: String(imported.version || ""), message: `版本不兼容：需要 3.0，当前文件为 ${imported.version || "未知"}` };
     }
@@ -405,7 +404,6 @@ export function useSelfMediaStore() {
     const sharedCounts: Record<string, number> = {};
     let hasOtherScopeData = false;
     let hasInvalidData = false;
-    // 必要字段校验
     const hasRequiredFields = (it: unknown): boolean => {
       if (!it || typeof it !== "object") return false;
       const o = it as Record<string, unknown>;
@@ -413,7 +411,6 @@ export function useSelfMediaStore() {
         && typeof o.accountId === "string" && o.accountId.length > 0
         && typeof o.storeId === "string" && o.storeId.length > 0;
     };
-    // characters 特殊处理（shared 不需要匹配当前 scope，但仍需 id）
     const charArr = Array.isArray(d.characters) ? (d.characters as Character[]) : [];
     totalCounts.characters = charArr.length;
     let charImport = 0, charSkip = 0, charShared = 0, charInvalid = 0;
@@ -428,7 +425,6 @@ export function useSelfMediaStore() {
     skippedCounts.characters = charSkip;
     invalidCounts.characters = charInvalid;
     sharedCounts.characters = charShared;
-    // 其他实体：校验必要字段 + scope
     SCOPED_ENTITIES.forEach(({ key }) => {
       const arr = Array.isArray(d[key]) ? (d[key] as Array<Record<string, unknown>>) : [];
       totalCounts[key] = arr.length;
@@ -442,7 +438,6 @@ export function useSelfMediaStore() {
       skippedCounts[key] = skip;
       invalidCounts[key] = inv;
     });
-    // warRoom
     const wr = d.warRoomByScope;
     if (wr && typeof wr === "object") {
       const keys = Object.keys(wr);
@@ -469,21 +464,17 @@ export function useSelfMediaStore() {
       hasOtherScopeData, hasInvalidData, message: msgs.join("；") + "。",
     };
   }, [currentAccount, currentStore]);
-  // ============ 导入（scope 校验 + 合并而非覆盖） ============
+
   const importData = useCallback((imported: ExportData): { success: boolean; message: string } => {
     try {
       const preview = previewImport(imported);
       if (!preview.valid) return { success: false, message: preview.message };
       const d = imported.data;
-
-      // 合并函数：按id去重，导入数据优先
       const mergeById = <T extends { id: string }>(existing: T[], incoming: T[]): T[] => {
         const map = new Map(existing.map((it) => [it.id, it]));
         incoming.forEach((it) => map.set(it.id, it));
         return Array.from(map.values());
       };
-
-      // characters: 只导入 shared + 当前scope
       if (Array.isArray(d.characters)) {
         const allowed = (d.characters as Character[]).filter((c) => {
           if (!c || !c.id) return false;
@@ -495,8 +486,6 @@ export function useSelfMediaStore() {
         }));
         setCharacters((prev) => mergeById(prev, allowed));
       }
-
-      // 其他实体：只导入当前scope
       SCOPED_ENTITIES.forEach(({ key }) => {
         const arr = d[key];
         if (!Array.isArray(arr)) return;
@@ -511,8 +500,6 @@ export function useSelfMediaStore() {
         const setter = setterMap[key];
         if (setter) setter((prev: any[]) => mergeById(prev, allowed as any[]));
       });
-
-      // warRoom: 只导入当前scope的key
       if (d.warRoomByScope && typeof d.warRoomByScope === "object") {
         const wr = d.warRoomByScope as WarRoomByScope;
         setWarRoomByScope((prev) => {
@@ -524,7 +511,6 @@ export function useSelfMediaStore() {
           return next;
         });
       }
-
       const totalImport = Object.values(preview.importCounts).reduce((a, b) => a + b, 0);
       const totalSkip = Object.values(preview.skippedCounts).reduce((a, b) => a + b, 0);
       return {
@@ -537,20 +523,14 @@ export function useSelfMediaStore() {
   }, [currentAccount, currentStore, previewImport]);
 
   return {
-    // 状态
     topics, characters, stories, scripts, media, publishes, analytics,
     reviews, adDecisions, experiments, templates, hotCases, videoAnalyses, warRoomByScope,
     currentAccount, currentStore,
-    // 账号门店
     setCurrentAccount, setCurrentStore,
-    // 作战台
     getWarRoomTasks, toggleWarRoomTask, setWarRoomTask,
-    // 导出导入
     exportData, importData, previewImport,
-    // 人物库（含shared支持）
     getVisibleCharacters,
     addCharacter, updateCharacter, removeCharacter,
-    // CRUD
     addTopic: (t: Omit<Topic, "id" | "accountId" | "storeId">) => addScoped(setTopics, t),
     createScriptFromTopic,
     updateTopic: (id: string, patch: Partial<Topic>) => updateScoped(setTopics, id, patch),
