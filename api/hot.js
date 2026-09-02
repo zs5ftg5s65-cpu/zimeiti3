@@ -16,9 +16,9 @@ function nextDayISO(iso) {
 }
 
 const PLATFORMS = [
-  { name: "抖音", domain: "douyin.com" },
-  { name: "小红书", domain: "xiaohongshu.com" },
-  { name: "视频号", domain: "channels.weixin.qq.com" },
+  { name: "抖音", domains: ["douyin.com"] },
+  { name: "小红书", domains: ["xiaohongshu.com"] },
+  { name: "视频号", domains: ["channels.weixin.qq.com", "weixin.qq.com"] },
 ];
 
 function decodeXml(value) {
@@ -48,10 +48,23 @@ function parseBingRss(xml) {
   return items;
 }
 
+function isAllowedPlatformUrl(platform, rawUrl) {
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase().replace(/^www\./, "");
+    return platform.domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+}
+
+function looksChinese(title) {
+  return /[\u3400-\u9fff]/.test(String(title || ""));
+}
+
 function cleanResult(platform, item, query, date, sourceType = "web_search") {
   const title = String(item?.title || item?.name || "").trim();
   const url = String(item?.link || item?.url || "").trim();
-  if (!title || !url) return null;
+  if (!title || !url || !looksChinese(title)) return null;
   return {
     platform,
     account: String(item?.source || item?.author || "").trim(),
@@ -79,7 +92,7 @@ async function searchWithSerper(query, apiKey) {
       "X-API-KEY": apiKey,
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ q: query, num: 3, hl: "zh-cn", gl: "cn" }),
+    body: JSON.stringify({ q: query, num: 5, hl: "zh-cn", gl: "cn" }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.message || data?.error || `搜索失败（${response.status}）`);
@@ -103,38 +116,45 @@ export default async function handler(req, res) {
   const keywords = Array.isArray(body.keywords) && body.keywords.length
     ? body.keywords.slice(0, 12).map(String)
     : ["餐饮老板娘", "实体店老板", "餐饮经营", "本地生活", "土菜馆", "餐饮创业"];
-  const queryBase = keywords.join(" OR ");
   const apiKey = process.env.HOT_SEARCH_API_KEY;
   const all = [];
   const errors = [];
 
   for (const p of PLATFORMS) {
-    const query = `site:${p.domain} (${queryBase}) after:${date} before:${nextDayISO(date)}`;
-    try {
-      const results = apiKey
-        ? await searchWithSerper(query, apiKey)
-        : await searchWithBingRss(query);
-      results.slice(0, 3).forEach((item, index) => {
-        const normalized = apiKey
-          ? { ...item, position: typeof item?.position === "number" ? item.position : index + 1 }
-          : item;
-        const row = cleanResult(p.name, normalized, query, date, "web_search");
-        if (row) all.push(row);
-      });
-    } catch (error) {
-      errors.push(`${p.name}：${error instanceof Error ? error.message : "搜索失败"}`);
+    // 不再使用一个很长的 OR 查询；逐个关键词搜索能显著降低 Bing 把无关英文页面混进来的概率。
+    const platformQuery = p.domains.map((domain) => `site:${domain}`).join(" OR ");
+    for (const keyword of keywords.slice(0, 4)) {
+      const query = `${platformQuery} ${keyword} after:${date} before:${nextDayISO(date)}`;
+      try {
+        const results = apiKey
+          ? await searchWithSerper(query, apiKey)
+          : await searchWithBingRss(query);
+        results.slice(0, 3).forEach((item, index) => {
+          const normalized = apiKey
+            ? { ...item, position: typeof item?.position === "number" ? item.position : index + 1 }
+            : item;
+          const rawUrl = String(normalized?.link || normalized?.url || "").trim();
+          // 最关键的防错：搜索引擎即使无视 site: 约束，也不能把国外/其他网站塞进案例库。
+          if (!isAllowedPlatformUrl(p, rawUrl)) return;
+          const row = cleanResult(p.name, normalized, query, date, "web_search");
+          if (row) all.push(row);
+        });
+      } catch (error) {
+        errors.push(`${p.name}：${error instanceof Error ? error.message : "搜索失败"}`);
+      }
     }
   }
 
+  const unique = Array.from(new Map(all.map((item) => [item.url, item])).values());
   const note = apiKey
-    ? "使用已配置的搜索服务；结果不是官方平台热榜，无热度数据时不虚构播放/点赞。"
-    : "未配置 HOT_SEARCH_API_KEY，已自动使用公开 Bing RSS 搜索；结果不是官方平台热榜，无热度数据时不虚构播放/点赞。";
+    ? "已限制为抖音/小红书/视频号域名结果；结果不是官方平台热榜，无热度数据时不虚构播放/点赞。"
+    : "未配置 HOT_SEARCH_API_KEY，已自动使用公开 Bing RSS 搜索，并严格限制为抖音/小红书/视频号域名；结果不是官方平台热榜，无热度数据时不虚构播放/点赞。";
 
   return res.status(200).json({
     date,
     collectedAt: new Date().toISOString().slice(0, 10),
-    items: all,
-    count: all.length,
+    items: unique,
+    count: unique.length,
     note,
     warnings: errors.length ? errors : undefined,
   });
