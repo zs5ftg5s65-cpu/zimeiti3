@@ -1,6 +1,12 @@
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "仅支持POST" });
   const apiKey = process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY;
+
+  // GET 仅用于前端显示“AI已连接/未连接”状态，不调用模型、不消耗额度。
+  if (req.method === "GET") {
+    return res.status(200).json({ configured: Boolean(apiKey) });
+  }
+
+  if (req.method !== "POST") return res.status(405).json({ error: "仅支持POST或GET" });
   if (!apiKey) return res.status(503).json({ error: "未配置DEEPSEEK_API_KEY，请在部署平台环境变量中配置" });
 
   try {
