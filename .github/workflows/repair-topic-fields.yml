@@ -1,0 +1,40 @@
+name: one-time repair topic fields
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch AI topic field normalization
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/panels/selfmedia3/TopicEnginePanel.tsx')
+          s = p.read_text()
+          anchor = '  // 选题→脚本闭环：统一由store生成完整可执行脚本\n'
+          helper = '''  // 兼容 DeepSeek/外部AI 返回中文字段、英文别名或不同命名，避免生成后卡片出现空白。\n  const pick = (obj: Record<string, unknown>, keys: string[], fallback = "") => {\n    for (const key of keys) {\n      const value = obj[key];\n      if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();\n    }\n    return fallback;\n  };\n\n'''
+          if helper not in s:
+              s = s.replace(anchor, helper + anchor, 1)
+          old = '''        const t = (item || {}) as Record<string, unknown>;\n        store.addTopic({\n          day: currentDay, title: String(t.title || `Day${currentDay} AI选题${index + 1}`),\n          riskLevel: (t.riskLevel || ["稳妥型", "测试型", "突破型"][index]) as TopicRiskLevel,\n          targetUser: String(t.targetUser || ""), painPoint: String(t.painPoint || ""),\n          contentType: (t.contentType || "老板娘口播") as ContentType, coreOpinion: String(t.coreOpinion || ""),\n          recommendedStore: String(t.recommendedStore || ""), recommendedPerson: String(t.recommendedPerson || "老板娘"),\n          recommendedDish: String(t.recommendedDish || ""), hook: String(t.hook || ""), structure: String(t.structure || ""),\n          cta: String(t.cta || ""), reason: String(t.reason || "AI根据今日Day任务生成"), risk: String(t.risk || ""),\n          factsToConfirm: String(t.factsToConfirm || ""), involvesCustomer: Boolean(t.involvesCustomer),\n          estimatedDuration: String(t.estimatedDuration || "30-60秒"), shootingDifficulty: (t.shootingDifficulty || "中等") as "简单" | "中等" | "较难",\n          status: "待采用", createdAt: Date.now() + index,\n        });'''
+          new = '''        const t = (item || {}) as Record<string, unknown>;\n        const risk = pick(t, ["riskLevel", "风险档位", "风险等级"], ["稳妥型", "测试型", "突破型"][index]) as TopicRiskLevel;\n        const contentType = pick(t, ["contentType", "内容类型"], "老板娘口播") as ContentType;\n        store.addTopic({\n          day: currentDay, title: pick(t, ["title", "标题", "选题标题"], `Day${currentDay} AI选题${index + 1}`),\n          riskLevel: risk,\n          targetUser: pick(t, ["targetUser", "目标用户", "目标客户"]),\n          painPoint: pick(t, ["painPoint", "用户痛点", "痛点"]),\n          contentType,\n          coreOpinion: pick(t, ["coreOpinion", "核心观点", "核心内容"]),\n          recommendedStore: pick(t, ["recommendedStore", "推荐门店"]),\n          recommendedPerson: pick(t, ["recommendedPerson", "推荐人物"], "老板娘"),\n          recommendedDish: pick(t, ["recommendedDish", "推荐菜品", "菜品"]),\n          hook: pick(t, ["hook", "Hook", "钩子", "前3秒钩子"]),\n          structure: pick(t, ["structure", "内容结构", "结构"]),\n          cta: pick(t, ["cta", "CTA", "行动号召", "行动号召（CTA）"]),\n          reason: pick(t, ["reason", "推荐理由", "生成理由"], "AI根据今日Day任务生成"),\n          risk: pick(t, ["risk", "风险"]),\n          factsToConfirm: pick(t, ["factsToConfirm", "需要确认的事实", "事实确认"]),\n          involvesCustomer: Boolean(t.involvesCustomer ?? t["是否涉及客人"] ?? false),\n          estimatedDuration: pick(t, ["estimatedDuration", "预计时长", "时长"], "30-60秒"),\n          shootingDifficulty: pick(t, ["shootingDifficulty", "拍摄难度"], "中等") as "简单" | "中等" | "较难",\n          status: "待采用", createdAt: Date.now() + index,\n        });'''
+          if old not in s:
+              raise SystemExit('expected AI topic block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Remove one-time workflow and commit repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/panels/selfmedia3/TopicEnginePanel.tsx
+          git rm .github/workflows/repair-topic-fields.yml
+          git commit -m 'fix: normalize AI topic fields from multilingual JSON'
+          git push
