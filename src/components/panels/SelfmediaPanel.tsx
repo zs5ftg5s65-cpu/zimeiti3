@@ -341,19 +341,24 @@ export default function SelfmediaPanel({ activeModule, initialTab, isCompleted, 
       </div>
 
       {/* 横向滚动 Tab — 移动端友好 */}
-      <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">
-        {SM3_TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => setTab(t.value)}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              tab === t.value ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            <t.icon className="size-3.5" />
-            {t.label}
-          </button>
-        ))}
+      <div className="w-full min-w-0 overflow-hidden">
+        <div
+          className="flex w-max min-w-full items-center gap-1 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin whitespace-nowrap overscroll-x-contain"
+          style={{ WebkitOverflowScrolling: "touch" }}
+        >
+          {SM3_TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => setTab(t.value)}
+              className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium leading-5 whitespace-nowrap transition-colors ${
+                tab === t.value ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <t.icon className="size-3.5 shrink-0" />
+              <span className="whitespace-nowrap">{t.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div>{renderTabContent()}</div>
