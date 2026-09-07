@@ -1,7 +1,7 @@
 // 自媒体3.0 Service Worker
-// 提供"可安装到主屏幕的Web App"能力，不声称"完全离线"。
+// 提供“可安装到主屏幕的Web App”能力，不声称“完全离线”。
 // 数据存储在浏览器 localStorage，清除浏览器数据将丢失。
-const CACHE_VERSION = 'selfmedia3-v3.0.4';
+const CACHE_VERSION = 'selfmedia3-v3.0.5';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -18,7 +18,6 @@ self.addEventListener('activate', (event) => {
     )
   );
   self.clients.claim();
-  // 激活后通知所有客户端有新版本
   event.waitUntil(
     self.clients.matchAll({ type: 'window' }).then((clients) => {
       clients.forEach((client) => client.postMessage({ type: 'SW_UPDATED', version: CACHE_VERSION }));
@@ -32,7 +31,6 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // HTML：Network First（确保总能拿到最新版本）
   if (request.mode === 'navigate' || request.destination === 'document') {
     event.respondWith(
       fetch(request)
@@ -46,7 +44,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // JS/CSS/字体/图片：Cache First
   if (['script', 'style', 'font', 'image'].includes(request.destination)) {
     event.respondWith(
       caches.match(request).then((cached) => {
@@ -65,7 +62,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // manifest等其他同源GET：网络优先回退缓存
   event.respondWith(
     fetch(request)
       .then((response) => {
@@ -79,7 +75,6 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// 监听前一个SW被替换时的更新提示
 self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
