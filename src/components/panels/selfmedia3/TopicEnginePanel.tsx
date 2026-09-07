@@ -72,6 +72,15 @@ export default function TopicEnginePanel({ store, onNavigate, currentDay = 1 }: 
     setForm({ riskLevel: "稳妥型", contentType: "老板娘口播", involvesCustomer: false, estimatedDuration: "30-60秒", shootingDifficulty: "中等" });
   };
 
+  // 兼容 DeepSeek/外部AI 返回中文字段、英文别名或不同命名，避免生成后卡片出现空白。
+  const pick = (obj: Record<string, unknown>, keys: string[], fallback = "") => {
+    for (const key of keys) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+    }
+    return fallback;
+  };
+
   // 选题→脚本闭环：统一由store生成完整可执行脚本
   const [aiGenerating, setAiGenerating] = useState(false);
 
@@ -85,16 +94,27 @@ export default function TopicEnginePanel({ store, onNavigate, currentDay = 1 }: 
       if (!list.length) throw new Error("AI没有返回有效选题");
       list.slice(0, 3).forEach((item, index) => {
         const t = (item || {}) as Record<string, unknown>;
+        const risk = pick(t, ["riskLevel", "风险档位", "风险等级"], ["稳妥型", "测试型", "突破型"][index]) as TopicRiskLevel;
+        const contentType = pick(t, ["contentType", "内容类型"], "老板娘口播") as ContentType;
         store.addTopic({
-          day: currentDay, title: String(t.title || `Day${currentDay} AI选题${index + 1}`),
-          riskLevel: (t.riskLevel || ["稳妥型", "测试型", "突破型"][index]) as TopicRiskLevel,
-          targetUser: String(t.targetUser || ""), painPoint: String(t.painPoint || ""),
-          contentType: (t.contentType || "老板娘口播") as ContentType, coreOpinion: String(t.coreOpinion || ""),
-          recommendedStore: String(t.recommendedStore || ""), recommendedPerson: String(t.recommendedPerson || "老板娘"),
-          recommendedDish: String(t.recommendedDish || ""), hook: String(t.hook || ""), structure: String(t.structure || ""),
-          cta: String(t.cta || ""), reason: String(t.reason || "AI根据今日Day任务生成"), risk: String(t.risk || ""),
-          factsToConfirm: String(t.factsToConfirm || ""), involvesCustomer: Boolean(t.involvesCustomer),
-          estimatedDuration: String(t.estimatedDuration || "30-60秒"), shootingDifficulty: (t.shootingDifficulty || "中等") as "简单" | "中等" | "较难",
+          day: currentDay, title: pick(t, ["title", "标题", "选题标题"], `Day${currentDay} AI选题${index + 1}`),
+          riskLevel: risk,
+          targetUser: pick(t, ["targetUser", "目标用户", "目标客户"]),
+          painPoint: pick(t, ["painPoint", "用户痛点", "痛点"]),
+          contentType,
+          coreOpinion: pick(t, ["coreOpinion", "核心观点", "核心内容"]),
+          recommendedStore: pick(t, ["recommendedStore", "推荐门店"]),
+          recommendedPerson: pick(t, ["recommendedPerson", "推荐人物"], "老板娘"),
+          recommendedDish: pick(t, ["recommendedDish", "推荐菜品", "菜品"]),
+          hook: pick(t, ["hook", "Hook", "钩子", "前3秒钩子"]),
+          structure: pick(t, ["structure", "内容结构", "结构"]),
+          cta: pick(t, ["cta", "CTA", "行动号召", "行动号召（CTA）"]),
+          reason: pick(t, ["reason", "推荐理由", "生成理由"], "AI根据今日Day任务生成"),
+          risk: pick(t, ["risk", "风险"]),
+          factsToConfirm: pick(t, ["factsToConfirm", "需要确认的事实", "事实确认"]),
+          involvesCustomer: Boolean(t.involvesCustomer ?? t["是否涉及客人"] ?? false),
+          estimatedDuration: pick(t, ["estimatedDuration", "预计时长", "时长"], "30-60秒"),
+          shootingDifficulty: pick(t, ["shootingDifficulty", "拍摄难度"], "中等") as "简单" | "中等" | "较难",
           status: "待采用", createdAt: Date.now() + index,
         });
       });
