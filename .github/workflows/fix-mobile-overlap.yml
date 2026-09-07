@@ -1,0 +1,36 @@
+name: fix mobile selfmedia overlap
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch mobile layout
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/panels/SelfmediaPanel.tsx')
+          s = p.read_text()
+          old = '''      <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">\n        {SM3_TABS.map((t) => (\n          <button\n            key={t.value}\n            onClick={() => setTab(t.value)}\n            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${\n              tab === t.value ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"\n            }`}\n          >\n            <t.icon className="size-3.5" />\n            {t.label}\n          </button>\n        ))}\n      </div>'''
+          new = '''      <div className="w-full min-w-0 overflow-hidden">\n        <div\n          className="flex w-max min-w-full items-center gap-1 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin whitespace-nowrap overscroll-x-contain"\n          style={{ WebkitOverflowScrolling: "touch" }}\n        >\n          {SM3_TABS.map((t) => (\n            <button\n              key={t.value}\n              onClick={() => setTab(t.value)}\n              className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium leading-5 whitespace-nowrap transition-colors ${\n                tab === t.value ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"\n              }`}\n            >\n              <t.icon className="size-3.5 shrink-0" />\n              <span className="whitespace-nowrap">{t.label}</span>\n            </button>\n          ))}\n        </div>\n      </div>'''
+          if old not in s:
+              raise SystemExit('target mobile tab block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Remove workflow and commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/panels/SelfmediaPanel.tsx
+          git rm .github/workflows/fix-mobile-overlap.yml
+          git commit -m 'fix: prevent selfmedia tabs from overlapping on mobile'
+          git push
